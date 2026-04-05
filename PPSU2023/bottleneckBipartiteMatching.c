@@ -990,6 +990,9 @@ double bidFromOneSide(int startblock, int endblock, int *cprm, int *col_ptrs, in
 * int sprankknown: if sprankknown == 0 at the beginning it is computed by this subroutine,
 * 	otherwise, it is aqssumed to be equal to the sprank.
 */
+#ifdef _WIN32
+__declspec(dllexport)
+#endif
 int bttlThreshold(int *col_ptrs, int *col_ids, double *col_vals, int n, int m, int *match, int *row_match, 
 		int *row_ptrs, 
 		int *row_ids,
