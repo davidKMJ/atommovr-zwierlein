@@ -79,90 +79,109 @@ def naive_par_Hung(
 def define_current_and_target_naive_par(
     matrix, other_matrix, target_config, other_target_config, relax: bool = False
 ):
-    # Find the smallest area containing enough atoms
     smallest_l = find_smallest_l(matrix, target_config)
-    n = len(matrix)
-    center = n / 2
-    delta = n % 2
-    left_bound = int(center - smallest_l + delta)
-    right_bound = int(center + smallest_l)
 
-    # In dual species case, we need to consider if other species atoms have occupied.
-    # current_positions = [(x, y) for x in range(center - smallest_l, center + smallest_l + 1) for y in range(center - smallest_l, center + smallest_l + 1) if matrix[x][y] == 1 if target_config[x][y] == 0 if other_matrix[x][y] == 0]
-    current_positions = [
-        (x, y)
-        for x in range(left_bound, right_bound)
-        for y in range(left_bound, right_bound)
-        if matrix[x][y] == 1
-        if target_config[x][y] == 0
-        if other_matrix[x][y] == 0
-    ]
-    target_positions = [
-        (x, y)
-        for x in range(len(matrix[0]))
-        for y in range(len(matrix))
-        if matrix[x][y] == 0
-        if target_config[x][y] == 1
-        if other_matrix[x][y] == 0
-    ]
+    n_rows, n_cols = matrix.shape
+
     redundant_area = [
-        (x, y)
-        for x in range(len(matrix[0]))
-        for y in range(len(matrix))
-        if target_config[x][y] == 0
-        if other_target_config[x][y] == 0
+        (row, col)
+        for row in range(n_rows)
+        for col in range(n_cols)
+        if target_config[row][col] == 0
+        if other_target_config[row][col] == 0
+    ]
+
+    # Graceful fallback for locally infeasible subproblems
+    if smallest_l is None:
+        return [], [], redundant_area
+
+    row_center = n_rows / 2
+    col_center = n_cols / 2
+    row_delta = n_rows % 2
+    col_delta = n_cols % 2
+
+    row_left = max(0, int(row_center - smallest_l + row_delta))
+    row_right = min(n_rows, int(row_center + smallest_l))
+    col_left = max(0, int(col_center - smallest_l + col_delta))
+    col_right = min(n_cols, int(col_center + smallest_l))
+
+    current_positions = [
+        (row, col)
+        for row in range(row_left, row_right)
+        for col in range(col_left, col_right)
+        if matrix[row][col] == 1
+        if target_config[row][col] == 0
+        if other_matrix[row][col] == 0
+    ]
+
+    target_positions = [
+        (row, col)
+        for row in range(n_rows)
+        for col in range(n_cols)
+        if matrix[row][col] == 0
+        if target_config[row][col] == 1
+        if other_matrix[row][col] == 0
     ]
 
     if len(current_positions) > 0 and len(target_positions) == 0:
-        try:
+        row_left2 = max(0, row_left - 2)
+        row_right2 = min(n_rows, row_right + 2)
+        col_left2 = max(0, col_left - 2)
+        col_right2 = min(n_cols, col_right + 2)
+
+        reservoir = [
+            (row, col)
+            for row in range(row_left2, row_right2)
+            for col in range(col_left2, col_right2)
+            if matrix[row][col] == 0
+            if target_config[row][col] == 0
+            if other_matrix[row][col] == 0
+            if other_target_config[row][col] == 0
+        ]
+
+        if len(reservoir) == 0:
             reservoir = [
-                (x, y)
-                for x in range(left_bound - 2, right_bound + 2)
-                for y in range(left_bound - 2, right_bound + 2)
-                if matrix[x][y] == 0
-                if target_config[x][y] == 0
-                if other_matrix[x][y] == 0
-                if other_target_config[x][y] == 0
+                (row, col)
+                for row in range(row_left, row_right)
+                for col in range(col_left, col_right)
+                if matrix[row][col] == 0
+                if target_config[row][col] == 0
+                if other_matrix[row][col] == 0
             ]
-        except IndexError:
-            reservoir = [
-                (x, y)
-                for x in range(left_bound, right_bound)
-                for y in range(left_bound, right_bound)
-                if matrix[x][y] == 0
-                if target_config[x][y] == 0
-                if other_matrix[x][y] == 0
-            ]
+
         return current_positions, reservoir, redundant_area
-    else:
-        return current_positions, target_positions, redundant_area
+
+    return current_positions, target_positions, redundant_area
 
 
 def find_smallest_l(matrix, target_config):
-    n = len(matrix)
-    center = n / 2
-    delta = n % 2
-    
+    n_rows, n_cols = matrix.shape
+
+    row_center = n_rows / 2
+    col_center = n_cols / 2
+    row_delta = n_rows % 2
+    col_delta = n_cols % 2
+
     total_atoms = int(np.sum(matrix))
     total_targets = int(np.sum(target_config))
-    
-    # Early exit: impossible to satisfy
+
+    # Local subproblem may be infeasible even if the global instance is feasible.
+    # Do not raise here; let the caller handle it gracefully.
     if total_atoms < total_targets:
-        raise ValueError(
-            f"Insufficient atoms ({total_atoms}) to satisfy targets ({total_targets})"
-        )
-    
-    smallest_l = 1
-    max_l = n  # safety limit
-    
-    while smallest_l <= max_l:
-        left_bound = int(center - smallest_l + delta)
-        right_bound = int(center + smallest_l)
-        if np.sum(matrix[left_bound:right_bound, left_bound:right_bound]) >= total_targets:
+        return None
+
+    max_l = max(n_rows, n_cols)
+
+    for smallest_l in range(1, max_l + 1):
+        row_left = max(0, int(row_center - smallest_l + row_delta))
+        row_right = min(n_rows, int(row_center + smallest_l))
+        col_left = max(0, int(col_center - smallest_l + col_delta))
+        col_right = min(n_cols, int(col_center + smallest_l))
+
+        if np.sum(matrix[row_left:row_right, col_left:col_right]) >= total_targets:
             return smallest_l
-        smallest_l += 1
-    
-    raise RuntimeError("Could not find sufficient area for atoms")
+
+    return None
 
 
 def generate_assignments_naive_par(
@@ -184,6 +203,9 @@ def generate_assignments_naive_par(
                 matrix, other_matrix, target_config, other_target_config, relax=True
             )
         )
+
+        if len(current_positions) == 0 or len(target_positions) == 0:
+            return []
 
     # If used_coord is provided, filter out the target positions that are already occupied
     if used_coord is not None:
@@ -242,14 +264,16 @@ def generate_path_naive_par(
     return move_list_for_assigns
 
 
-def neighbors_8_naive_par(r: int, c: int, n: int) -> list[tuple[int, int]]:
+def neighbors_8_naive_par(
+    r: int, c: int, n_rows: int, n_cols: int
+) -> list[tuple[int, int]]:
     neighbors = []
     directions = [
         (dr, dc) for dr in [-1, 0, 1] for dc in [-1, 0, 1] if (dr, dc) != (0, 0)
     ]
     for dr, dc in directions:
         nr, nc = r + dr, c + dc
-        if 0 <= nr < n and 0 <= nc < n:
+        if 0 <= nr < n_rows and 0 <= nc < n_cols:
             neighbors.append((nr, nc))
     return neighbors
 
@@ -261,9 +285,8 @@ def bfs_find_path_naive_par(
     handle_obstacle_filter: Callable[[tuple[int, int], tuple[int, int]], bool],
 ) -> BFSResult:
 
-    n = matrix.shape[0]
+    n_rows, n_cols = matrix.shape[:2]
 
-    # Initialize a queue for BFS. Each element is (row, col, path_so_far)
     visited = set([start])
     same_obstacle_list = []
     diff_obstacle_list = []
@@ -274,7 +297,6 @@ def bfs_find_path_naive_par(
     while queue:
         row, col, path_so_far, same_obstacle_list, diff_obstacle_list = queue.popleft()
 
-        # If we reached the end, return the path
         if (row, col) == end:
             if len(diff_obstacle_list) == 0:
                 return BFSResult(
@@ -285,8 +307,7 @@ def bfs_find_path_naive_par(
                     path_so_far, True, same_obstacle_list, diff_obstacle_list, 2
                 )
 
-        # Explore all possible neighbors
-        for new_r, new_c in neighbors_8_naive_par(row, col, n):
+        for new_r, new_c in neighbors_8_naive_par(row, col, n_rows, n_cols):
             if (new_r, new_c) not in visited:
                 pass_flag, homo_obs, hetero_obs = handle_obstacle_filter(
                     start, (new_r, new_c)
