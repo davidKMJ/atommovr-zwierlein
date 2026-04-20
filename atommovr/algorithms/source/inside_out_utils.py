@@ -170,22 +170,6 @@ def collect_coords(
 
     return [(r, c) for (r, c) in candidates if condition_func(r, c, out_bound)]
 
-
-def perimeter_coords(
-    top: int, left: int, bottom: int, right: int
-) -> list[tuple[int, int]]:
-    """
-    Return a list of (row, col) coordinates around the perimeter of the rectangle
-    defined by (top, left, bottom, right).
-    """
-    coords = []
-    coords.extend((top, c) for c in range(left, right + 1))
-    coords.extend((r, right) for r in range(top + 1, bottom + 1))
-    coords.extend((bottom, c) for c in range(right - 1, left - 1, -1))
-    coords.extend((r, left) for r in range(bottom - 1, top, -1))
-    return coords
-
-
 def is_rb_source(arrays: AtomArray) -> Callable[[int, int], bool]:
     def _check(r, c, out_bound: bool = False):
         return bool(
