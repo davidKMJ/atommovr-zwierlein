@@ -359,21 +359,6 @@ def process_chain_moves_new(bfs_res: BFSResult):
     single_path.append(tuple(segmant_path))
     return single_path[::-1]
 
-
-def generate_decomposed_move_list(
-    op_arrays: AtomArray, single_path: list, move_list_for_assigns: list
-):
-    for segment in single_path:
-        from_row, from_col = segment[0]
-        if len(segment) <= 1:
-            continue
-
-        to_row, to_col = segment[1]
-
-        op_arrays.matrix[from_row, from_col] = 0
-        op_arrays.matrix[to_row, to_col] = 1
-
-
 def generate_decomposed_move_list(
     op_arrays: AtomArray, single_path: list, move_list_for_assigns: list
 ):
