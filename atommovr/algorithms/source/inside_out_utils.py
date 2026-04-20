@@ -15,27 +15,6 @@ from atommovr.utils.move_utils import move_atoms
 from atommovr.algorithms.source.Hungarian_works import generate_AOD_cmds
 
 
-def perimeter_coords(
-    top: int, left: int, bottom: int, right: int
-) -> list[tuple[int, int]]:
-    """
-    Return a list of (row, col) coordinates around the perimeter of the rectangle
-    defined by (top, left, bottom, right).
-    """
-    coords = []
-    coords.extend((top, c) for c in range(left, right + 1))  # Top row: left → right
-    coords.extend(
-        (r, right) for r in range(top + 1, bottom + 1)
-    )  # Right column: top+1 → bottom
-    coords.extend(
-        (bottom, c) for c in range(right - 1, left - 1, -1)
-    )  # Bottom row: right-1 → left
-    coords.extend(
-        (r, left) for r in range(bottom - 1, top, -1)
-    )  # Left column: bottom-1 → top+1
-    return coords
-
-
 def def_boundary(layer_factor: int, array_len: int):
     n = array_len
     i = (n + 1) % 2  # If n is even, define the "center" as (n//2 - 1, n//2 - 1).
