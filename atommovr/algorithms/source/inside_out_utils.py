@@ -130,42 +130,67 @@ def collect_coords(
     Args:
         arrays (AtomArray): dual-species atom array object.
         layer_factor (int): Factor for computing boundary via def_boundary.
-        region (str): Either 'layer' or 'outer'.
-        condition_func (Callable): A function taking (row, col) -> bool.
+        region (str): Either 'layer', 'outer', or 'all'.
+        condition_func (Callable): A function taking (row, col, out_bound) -> bool.
 
     Returns:
         list[tuple[int,int]]: All (row, col) that pass the condition_func.
     """
-    n = arrays.matrix.shape[0]
-    top, left, bottom, right = def_boundary(layer_factor - 1, n)
+    n_rows, n_cols = arrays.matrix.shape[:2]
 
-    # Decide which set of candidate coordinates to gather
+    # Keep the existing boundary convention, but clamp later to actual array shape.
+    top, left, bottom, right = def_boundary(layer_factor - 1, n_rows)
+
+    def in_bounds(r: int, c: int) -> bool:
+        return 0 <= r < n_rows and 0 <= c < n_cols
+
     if region == "layer":
-        candidates = perimeter_coords(top, left, bottom, right)
+        candidates = [
+            (r, c)
+            for (r, c) in perimeter_coords(top, left, bottom, right)
+            if in_bounds(r, c)
+        ]
         out_bound = False
+
     elif region == "outer":
         candidates = [
             (r, c)
-            for r in range(n)
-            for c in range(n)
+            for r in range(n_rows)
+            for c in range(n_cols)
             if out_bound_ex(r, c, top, left, bottom, right)
         ]
         out_bound = True
+
     elif region == "all":
-        candidates = [(r, c) for r in range(n) for c in range(n)]
+        candidates = [(r, c) for r in range(n_rows) for c in range(n_cols)]
         out_bound = False
+
     else:
         raise ValueError(f"Unrecognized region: {region}")
 
-    # Filter by the user-provided condition
     return [(r, c) for (r, c) in candidates if condition_func(r, c, out_bound)]
+
+
+def perimeter_coords(
+    top: int, left: int, bottom: int, right: int
+) -> list[tuple[int, int]]:
+    """
+    Return a list of (row, col) coordinates around the perimeter of the rectangle
+    defined by (top, left, bottom, right).
+    """
+    coords = []
+    coords.extend((top, c) for c in range(left, right + 1))
+    coords.extend((r, right) for r in range(top + 1, bottom + 1))
+    coords.extend((bottom, c) for c in range(right - 1, left - 1, -1))
+    coords.extend((r, left) for r in range(bottom - 1, top, -1))
+    return coords
 
 
 def is_rb_source(arrays: AtomArray) -> Callable[[int, int], bool]:
     def _check(r, c, out_bound: bool = False):
-        return bool(arrays.matrix[r, c, 0] == 1 and (
-            arrays.target[r, c, 0] == 0 or out_bound
-        ))
+        return bool(
+            arrays.matrix[r, c, 0] == 1 and (arrays.target[r, c, 0] == 0 or out_bound)
+        )
 
     return _check
 
@@ -179,9 +204,9 @@ def is_rb_target(arrays: AtomArray) -> Callable[[int, int], bool]:
 
 def is_cs_source(arrays: AtomArray) -> Callable[[int, int], bool]:
     def _check(r, c, out_bound: bool = False):
-        return bool(arrays.matrix[r, c, 1] == 1 and (
-            arrays.target[r, c, 1] == 0 or out_bound
-        ))
+        return bool(
+            arrays.matrix[r, c, 1] == 1 and (arrays.target[r, c, 1] == 0 or out_bound)
+        )
 
     return _check
 
@@ -354,14 +379,28 @@ def process_chain_moves_new(bfs_res: BFSResult):
 def generate_decomposed_move_list(
     op_arrays: AtomArray, single_path: list, move_list_for_assigns: list
 ):
+    for segment in single_path:
+        from_row, from_col = segment[0]
+        if len(segment) <= 1:
+            continue
+
+        to_row, to_col = segment[1]
+
+        op_arrays.matrix[from_row, from_col] = 0
+        op_arrays.matrix[to_row, to_col] = 1
+
+
+def generate_decomposed_move_list(
+    op_arrays: AtomArray, single_path: list, move_list_for_assigns: list
+):
     # Iterate all path segments (((a1,b1), (a2,b2), (a3, b3), (a4,b4)), ((c1,d1), (c2,d2)))
     for segmant in single_path:
         segmant_moves = []
         from_row, from_col = segmant[0]
         if len(segmant) <= 1:
             continue
-        op_arrays.matrix[from_row][from_col] = 0
-        op_arrays.matrix[segmant[1][0]][segmant[1][0]] = 1
+        op_arrays.matrix[from_row, from_col] = 0
+        op_arrays.matrix[segmant[1][0], segmant[1][1]] = 1
         for coordinate in segmant:
             to_row, to_col = coordinate
             if (to_row, to_col) != (from_row, from_col):  # To exclude the frist move

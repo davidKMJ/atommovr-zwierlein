@@ -54,7 +54,9 @@ def parallel_LBAP_algorithm_works(
 
         # effective_config = np.multiply(matrix, target_config)
         if Algorithm.get_success_flag(
-            matrix, target_config, do_ejection=do_ejection, n_species=1
+            matrix,
+            target_config,
+            do_ejection=do_ejection,
         ):
             complete_flag = True
             LBAP_success_flag = True
@@ -183,7 +185,6 @@ def Hungarian_algorithm_works_fast(
         eject_config.reshape(np.shape(target_config)),
         target_config,
         do_ejection=do_ejection,
-        n_species=1,
     )
     return eject_config, move_set, success_flag
 
@@ -242,7 +243,6 @@ def Hungarian_algorithm_works(
         eject_config.reshape(np.shape(target_config)),
         target_config,
         do_ejection=do_ejection,
-        n_species=1,
     )
 
     return eject_config, move_set, success_flag
@@ -288,7 +288,9 @@ def parallel_Hungarian_algorithm_works(
 
         # effective_config = np.multiply(matrix, target_config)
         if Algorithm.get_success_flag(
-            matrix, target_config, do_ejection=do_ejection, n_species=1
+            matrix,
+            target_config,
+            do_ejection=do_ejection,
         ):
             complete_flag = True
             Hungarian_success_flag = True
@@ -478,15 +480,15 @@ def generate_path(arrays, start, end):
 def define_current_and_target(matrix, target_config):
     current_positions = [
         (x, y)
-        for x in range(len(matrix[0]))
-        for y in range(len(matrix))
+        for x in range(len(matrix))
+        for y in range(len(matrix[0]))
         if matrix[x][y] == 1
         if target_config[x][y] == 0
     ]  # NKH this should in theory not change anything...
     target_positions = [
         (x, y)
-        for x in range(len(matrix[0]))
-        for y in range(len(matrix))
+        for x in range(len(matrix))
+        for y in range(len(matrix[0]))
         if target_config[x][y] == 1
         if matrix[x][y] == 0
     ]  # same here
@@ -539,8 +541,8 @@ def move_atom_and_show_grid_og(grid, start, end):
 def generate_AOD_cmds(matrix, move_seq):
     row_num = len(matrix)
     col_num = len(matrix[0])
-    horiz_AOD_cmds = np.zeros([row_num])
-    vert_AOD_cmds = np.zeros([col_num])
+    horiz_AOD_cmds = np.zeros([col_num])
+    vert_AOD_cmds = np.zeros([row_num])
     parallel_success_flag = True
     op_matrix = copy.deepcopy(matrix)
 
@@ -592,7 +594,7 @@ def generate_AOD_cmds(matrix, move_seq):
             break
 
     if parallel_success_flag:
-        move_list = get_move_list_from_AOD_cmds(vert_AOD_cmds, horiz_AOD_cmds)
+        move_list = get_move_list_from_AOD_cmds(horiz_AOD_cmds, vert_AOD_cmds)
         matrix_from_AOD, _ = move_atoms(copy.deepcopy(matrix), move_list)
         matrix_from_seq, _ = move_atoms(copy.deepcopy(matrix), move_seq)
 
