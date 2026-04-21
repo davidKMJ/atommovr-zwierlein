@@ -15,7 +15,15 @@ from atommovr.utils.core import (
     CONFIGURATION_PLOT_LABELS,
 )
 from atommovr.utils.AtomArray import AtomArray
-from atommovr.algorithms.Algorithm_class import Algorithm, get_effective_target_grid
+from atommovr.algorithms.Algorithm_class import Algorithm
+
+
+def _count_wrong_places(matrix, target, do_ejection: bool) -> int:
+    if do_ejection:
+        return int(np.count_nonzero(matrix != target))
+
+    required = target == 1
+    return int(np.count_nonzero(matrix[required] != 1))
 
 
 def evaluate_moves(array: AtomArray, move_list: list):
@@ -822,7 +830,6 @@ class Benchmarking:
                     self.tweezer_array.matrix,
                     self.tweezer_array.target,
                     do_ejection=do_ejection,
-                    n_species=self.tweezer_array.n_species,
                 )
                 if success_flag == 1:
                     break
@@ -842,35 +849,15 @@ class Benchmarking:
                 )
             )
 
-            # Identify wrong places (atoms that are not in the target configuration)
-            if do_ejection:
-                wrong_places.append(
-                    int(
-                        np.sum(
-                            np.abs(
-                                self.tweezer_array.matrix - self.tweezer_array.target
-                            )
-                        )
-                    )
+            # Identify wrong places
+            wrong_places.append(
+                _count_wrong_places(
+                    self.tweezer_array.matrix,
+                    self.tweezer_array.target,
+                    do_ejection,
                 )
-            else:
-                start_row, end_row, start_col, end_col = get_effective_target_grid(
-                    self.tweezer_array.target
-                )
-                wrong_places.append(
-                    int(
-                        np.sum(
-                            np.abs(
-                                self.tweezer_array.matrix[
-                                    start_row : end_row + 1, start_col : end_col + 1
-                                ]
-                                - self.tweezer_array.target[
-                                    start_row : end_row + 1, start_col : end_col + 1
-                                ]
-                            )
-                        )
-                    )
-                )
+            )
+
             # Count atoms in array
             atoms_in_arrays.append(int(np.sum(self.tweezer_array.matrix)))
             atoms_in_targets.append(int(np.sum(self.tweezer_array.target)))
