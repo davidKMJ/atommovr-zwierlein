@@ -82,28 +82,10 @@ class Algorithm:
         state: np.ndarray,
         target: np.ndarray,
         do_ejection: bool = False,
-        n_species: int = 1,
     ) -> bool:
         """
         Checks if the target configuration was prepared and returns a flag.
-
-        If do_ejection = False, the function only checks the square area around
-        the target configuration. If True, it checks the entire array.
-
-        ## Parameters
-        FINISH THIS.
-
         """
-        success_flag = False
-        if not do_ejection:  # if do_ejection == False:
-            start_row, end_row, start_col, end_col = get_effective_target_grid(
-                target, n_species
-            )
-        else:
-            start_row, start_col = 0, 0
-            end_row, end_col = np.shape(state)[:2]
-            end_row -= 1
-            end_col -= 1
 
         if np.shape(state) != np.shape(target):
             print(
@@ -111,22 +93,41 @@ class Algorithm:
             )
             state = state.reshape(np.shape(target))
 
-        if n_species == 1:
-            if np.array_equal(
-                state[start_row : end_row + 1, start_col : end_col + 1],
-                target[start_row : end_row + 1, start_col : end_col + 1],
-            ):
-                success_flag = True
-        elif n_species == 2:
-            if np.array_equal(
-                state[start_row : end_row + 1, start_col : end_col + 1, :],
-                target[start_row : end_row + 1, start_col : end_col + 1, :],
-            ):
-                success_flag = True
+        # If do_ejection is True, we expect that the array is same as target.
+        if do_ejection:
+            return np.array_equal(state, target)
+        else:
+            # If do_ejection is False, we expect that the array has 1s at least where the target has 1s, but it can have more 1s (i.e. extra atoms that need to be ejected).
+            return np.array_equal(np.multiply(state, target), target)
 
-        return success_flag
+        # success_flag = False
+        # if not do_ejection:
+        #     start_row, end_row, start_col, end_col = get_effective_target_grid(
+        #         target, n_species
+        #     )
+        # else:
+        #     start_row, start_col = 0, 0
+        #     end_row, end_col = np.shape(state)[:2]
+        #     end_row -= 1
+        #     end_col -= 1
+
+        # if n_species == 1:
+        #     if np.array_equal(
+        #         state[start_row : end_row + 1, start_col : end_col + 1],
+        #         target[start_row : end_row + 1, start_col : end_col + 1],
+        #     ):
+        #         success_flag = True
+        # elif n_species == 2:
+        #     if np.array_equal(
+        #         state[start_row : end_row + 1, start_col : end_col + 1, :],
+        #         target[start_row : end_row + 1, start_col : end_col + 1, :],
+        #     ):
+        #         success_flag = True
+
+        # return success_flag
 
 
+"""
 def get_effective_target_grid(target, n_species=1):
     try:
         n_rows, n_cols = target.shape
@@ -172,3 +173,4 @@ def get_effective_target_grid(target, n_species=1):
         raise ValueError(
             "No atoms in target configuration. Did you initialize a target configuration with AtomArray.generate_target()?"
         ) from ule
+"""
