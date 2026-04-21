@@ -412,7 +412,6 @@ class TestTRANSFORM_PATHS_INTO_MOVES:
             assert ok
             assert not support_mask.any()
 
-
     def test_matches_original_on_handcrafted_intersecting_paths(self) -> None:
         """
         Behavioral regression test: refactored scheduling must preserve the
