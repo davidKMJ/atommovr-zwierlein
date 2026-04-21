@@ -70,7 +70,7 @@ class TestDefBoundary:
     def test_returns_valid_boundary(self) -> None:
         """Boundary should form valid rectangle with top < bottom and left < right."""
         for array_len in [5, 6, 7, 8]:
-            top, left, bottom, right = def_boundary(0, array_len)
+            top, left, bottom, right = def_boundary(0, array_len, array_len)
             assert top <= bottom
             assert left <= right
             assert top >= 0
@@ -81,7 +81,7 @@ class TestDefBoundary:
     def test_layer_zero_is_center(self) -> None:
         """Layer 0 should be near center of array."""
         array_len = 8
-        top, left, bottom, right = def_boundary(0, array_len)
+        top, left, bottom, right = def_boundary(0, array_len, array_len)
         center = array_len // 2
         # Center should be roughly in middle of boundary
         assert top <= center <= bottom
@@ -90,8 +90,8 @@ class TestDefBoundary:
     def test_larger_layers_expand_outward(self) -> None:
         """Larger layer factors should produce larger boundaries."""
         array_len = 10
-        top0, left0, bottom0, right0 = def_boundary(0, array_len)
-        top1, left1, bottom1, right1 = def_boundary(1, array_len)
+        top0, left0, bottom0, right0 = def_boundary(0, array_len, array_len)
+        top1, left1, bottom1, right1 = def_boundary(1, array_len, array_len)
 
         # Layer 1 boundary should be larger
         area0 = (bottom0 - top0 + 1) * (right0 - left0 + 1)

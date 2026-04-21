@@ -14,6 +14,7 @@ from atommovr.utils.AtomArray import AtomArray
 from atommovr.utils.move_utils import move_atoms
 from atommovr.algorithms.source.Hungarian_works import generate_AOD_cmds
 
+
 def perimeter_coords(
     top: int, left: int, bottom: int, right: int
 ) -> list[tuple[int, int]]:
@@ -34,15 +35,21 @@ def perimeter_coords(
     )  # Left column: bottom-1 → top+1
     return coords
 
-def def_boundary(layer_factor: int, array_len: int):
-    n = array_len
-    i = (n + 1) % 2  # If n is even, define the "center" as (n//2 - 1, n//2 - 1).
 
-    center = n // 2 - i
-    top = center - layer_factor
-    left = center - layer_factor
-    bottom = center + layer_factor + i
-    right = center + layer_factor + i
+def def_boundary(
+    layer_factor: int, n_rows: int, n_cols: int
+) -> tuple[int, int, int, int]:
+    row_odd = (
+        n_rows + 1
+    ) % 2  # If n is even, define the "center" as (n//2 - 1, n//2 - 1).
+    col_odd = (n_cols + 1) % 2
+
+    center_r = n_rows // 2 - row_odd
+    center_c = n_cols // 2 - col_odd
+    top = center_r - layer_factor
+    left = center_c - layer_factor
+    bottom = center_r + layer_factor + row_odd
+    right = center_c + layer_factor + col_odd
 
     return top, left, bottom, right
 
@@ -137,7 +144,7 @@ def collect_coords(
     n_rows, n_cols = arrays.matrix.shape[:2]
 
     # Keep the existing boundary convention, but clamp later to actual array shape.
-    top, left, bottom, right = def_boundary(layer_factor - 1, n_rows)
+    top, left, bottom, right = def_boundary(layer_factor - 1, n_rows, n_cols)
 
     def in_bounds(r: int, c: int) -> bool:
         return 0 <= r < n_rows and 0 <= c < n_cols
@@ -167,6 +174,7 @@ def collect_coords(
         raise ValueError(f"Unrecognized region: {region}")
 
     return [(r, c) for (r, c) in candidates if condition_func(r, c, out_bound)]
+
 
 def is_rb_source(arrays: AtomArray) -> Callable[[int, int], bool]:
     def _check(r, c, out_bound: bool = False):
@@ -225,12 +233,8 @@ def out_bound_ex(x, y, top, left, bottom, right):
     return x < top or x > bottom or y < left or y > right
 
 
-# def out_bound_in(x, y, top, left, bottom, right):
-#     return x <= top or x >= bottom or y <= left or y >= right
-
-
 def assign_species(
-    source_layer, source_outer, target_layer, target_outer, reservoir
+    source_layer, source_outer, target_layer, _target_outer, reservoir
 ) -> "tuple[list[tuple[tuple[int, int]]], list[tuple]]":
     # Make move out assignments
     assignments = []
@@ -315,7 +319,8 @@ def generate_cost_matrix_penalty(
 
 def separate_assign(arrays: AtomArray, prepared_assignments: list, layer_factor: int):
     out_assign, in_assign = [], []
-    top, left, bottom, right = def_boundary(layer_factor - 1, arrays.matrix.shape[0])
+    n_rows, n_cols = arrays.matrix.shape[:2]
+    top, left, bottom, right = def_boundary(layer_factor - 1, n_rows, n_cols)
     layer_coords = perimeter_coords(top, left, bottom, right)
 
     for source, target in prepared_assignments:
@@ -397,7 +402,7 @@ def generate_decomposed_move_list_old(
 
 
 def neighbors_8_ex_end(
-    r: int, c: int, n: int, layer_bound: list, end: tuple
+    r: int, c: int, n_rows: int, n_cols: int, layer_bound: list, end: tuple
 ) -> list[tuple[int, int]]:
     neighbors = []
     directions = [
@@ -409,14 +414,16 @@ def neighbors_8_ex_end(
             out_bound_ex(
                 nr, nc, layer_bound[0], layer_bound[1], layer_bound[2], layer_bound[3]
             )
-            and 0 <= nr < n
-            and 0 <= nc < n
+            and 0 <= nr < n_rows
+            and 0 <= nc < n_cols
         ) or (nr, nc) == end:
             neighbors.append((nr, nc))
     return neighbors
 
 
-def neighbors_8(r: int, c: int, n: int, layer_bound: list) -> list[tuple[int, int]]:
+def neighbors_8(
+    r: int, c: int, n_rows: int, n_cols: int, layer_bound: list
+) -> list[tuple[int, int]]:
     neighbors = []
     directions = [
         (dr, dc) for dr in [-1, 0, 1] for dc in [-1, 0, 1] if (dr, dc) != (0, 0)
@@ -427,8 +434,8 @@ def neighbors_8(r: int, c: int, n: int, layer_bound: list) -> list[tuple[int, in
             out_bound_in(
                 nr, nc, layer_bound[0], layer_bound[1], layer_bound[2], layer_bound[3]
             )
-            and 0 <= nr < n
-            and 0 <= nc < n
+            and 0 <= nr < n_rows
+            and 0 <= nc < n_cols
         ):
             neighbors.append((nr, nc))
     return neighbors
@@ -442,8 +449,8 @@ def bfs_find_path_new(
     handle_obstacle_filter: Callable[[tuple[int, int], tuple[int, int]], bool],
 ) -> BFSResult:
 
-    n = matrix.shape[0]
-    layer_bound = list(def_boundary(layer_factor - 1, n))
+    n_rows, n_cols = matrix.shape[:2]
+    layer_bound = list(def_boundary(layer_factor - 1, n_rows, n_cols))
 
     # Initialize a queue for BFS. Each element is (row, col, path_so_far)
     visited = set([start])
@@ -468,7 +475,9 @@ def bfs_find_path_new(
                 )
 
         # Explore all possible neighbors
-        for new_r, new_c in neighbors_8_ex_end(row, col, n, layer_bound, end):
+        for new_r, new_c in neighbors_8_ex_end(
+            row, col, n_rows, n_cols, layer_bound, end
+        ):
             if (new_r, new_c) not in visited:
                 pass_flag, homo_obs, hetero_obs = handle_obstacle_filter(
                     start, (new_r, new_c)
@@ -633,7 +642,7 @@ def regroup_parallel_moves(matrix, move_seqq):
                 continue
 
             # horiz_AOD_cmds, vert_AOD_cmds, can_parallelize, move_list_with_ghost = generate_AOD_cmds(matrix_copy, parallel_moves + [p_move])
-            horiz_AOD_cmds, vert_AOD_cmds, can_parallelize = generate_AOD_cmds(
+            _horiz_AOD_cmds, _vert_AOD_cmds, can_parallelize = generate_AOD_cmds(
                 matrix_copy, parallel_moves + [p_move]
             )
 
@@ -712,9 +721,10 @@ def find_push_coord(
     """
 
     obs_r, obs_c = obs_coord
-    n = arrays.matrix.shape[0]
-    center = n // 2
-    top, left, bottom, right = def_boundary(layer_factor, n)
+    n_rows, n_cols = arrays.matrix.shape[:2]
+    center_r = n_rows // 2
+    center_c = n_cols // 2
+    top, left, bottom, right = def_boundary(layer_factor, n_rows, n_cols)
     layer_exclusions = perimeter_coords(top, left, bottom, right)
 
     # 1) Build candidate directions
@@ -735,7 +745,7 @@ def find_push_coord(
                 continue
             # skip direction if it heads inward
             if (
-                is_inward_direction(obs_r, obs_c, nr, nc, center, center)
+                is_inward_direction(obs_r, obs_c, nr, nc, center_r, center_c)
                 and relaxed_condition <= 0
             ):
                 continue
@@ -777,13 +787,13 @@ def find_push_coord(
 def find_empty_in_direction(
     arrays: AtomArray, obs_r: int, obs_c: int, dr: int, dc: int, ejection: bool
 ) -> tuple[int, int] | None:
-    n = arrays.matrix.shape[0]
+    n_rows, n_cols = arrays.matrix.shape[:2]
     cur_r, cur_c = obs_r, obs_c
 
     while True:
         cur_r += dr
         cur_c += dc
-        if cur_r < 0 or cur_r >= n or cur_c < 0 or cur_c >= n:
+        if cur_r < 0 or cur_r >= n_rows or cur_c < 0 or cur_c >= n_cols:
             if not ejection:
                 return None
             else:
