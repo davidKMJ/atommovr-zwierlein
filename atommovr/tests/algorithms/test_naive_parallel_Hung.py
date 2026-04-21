@@ -201,12 +201,12 @@ class TestNeighbors8NaivePar:
 
     def test_returns_8_neighbors_for_center(self) -> None:
         """Center point should have 8 neighbors."""
-        neighbors = neighbors_8_naive_par(3, 3, 8)
+        neighbors = neighbors_8_naive_par(3, 3, 8, 8)
         assert len(neighbors) == 8
 
     def test_returns_3_neighbors_for_corner(self) -> None:
         """Corner point should have 3 neighbors."""
-        neighbors = neighbors_8_naive_par(0, 0, 8)
+        neighbors = neighbors_8_naive_par(0, 0, 8, 8)
         assert len(neighbors) == 3
         assert (0, 1) in neighbors
         assert (1, 0) in neighbors
@@ -214,7 +214,7 @@ class TestNeighbors8NaivePar:
 
     def test_respects_grid_bounds(self) -> None:
         """Neighbors should not exceed grid boundaries."""
-        neighbors = neighbors_8_naive_par(0, 0, 5)
+        neighbors = neighbors_8_naive_par(0, 0, 5, 5)
         for r, c in neighbors:
             assert 0 <= r < 5
             assert 0 <= c < 5
