@@ -176,7 +176,7 @@ class TestGenerateAssignmentsNaivePar:
         )
 
         # (0, 0) should not be in assignments as source
-        for start, _end in assignments:
+        for start, _ in assignments:
             assert start != (0, 0)
 
     def test_handles_empty_targets(self) -> None:
@@ -409,7 +409,7 @@ class TestNaiveParHung:
         aa.target[4, 4, 0] = 1
         aa.target[3, 3, 1] = 1
 
-        result_aa, moves, _ = naive_par_Hung(aa, do_ejection=False, round_lim=10)
+        _result_aa, moves, _ = naive_par_Hung(aa, do_ejection=False, round_lim=10)
 
         for round_idx, round_moves in enumerate(moves):
             assert isinstance(round_moves, list), f"Round {round_idx} is not a list"

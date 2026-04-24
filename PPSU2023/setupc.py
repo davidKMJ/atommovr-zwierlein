@@ -43,7 +43,7 @@ c_extension = Extension(
 
 
 class BuildSharedLibrary(build_ext):
-    
+
     def run(self) -> None:
         """
         Build only the PPSU shared library.

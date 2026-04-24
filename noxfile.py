@@ -23,15 +23,19 @@ import sys
 #     # Run pytest; coverage options are defined in pyproject.toml
 #     session.run("pytest")
 
+
 @nox.session
 def tests(session):
     if sys.platform == "darwin" and platform.machine() == "arm64":
         session.env["ARCHFLAGS"] = "-arch arm64"
         session.env["CFLAGS"] = (session.env.get("CFLAGS", "") + " -arch arm64").strip()
-        session.env["LDFLAGS"] = (session.env.get("LDFLAGS", "") + " -arch arm64").strip()
+        session.env["LDFLAGS"] = (
+            session.env.get("LDFLAGS", "") + " -arch arm64"
+        ).strip()
 
-    session.install("setuptools","-e", ".", "pytest", "pytest-cov")
+    session.install("setuptools", "-e", ".", "pytest", "pytest-cov")
     session.run("pytest")
+
 
 # ------------------------------
 # FORMAT SESSION
@@ -45,6 +49,7 @@ def format(session):
     # Adjust paths as needed (src contains package, tests contain test code)
     session.run("black", "--check", "atommovr", "atommovr/tests")
 
+
 # ------------------------------
 # LINT SESSION
 # ------------------------------
@@ -54,6 +59,7 @@ def lint(session):
     session.install("ruff")
     # Run Ruff on package and tests directories
     session.run("ruff", "check", "atommovr", "atommovr/tests")
+
 
 # ------------------------------
 # USAGE
