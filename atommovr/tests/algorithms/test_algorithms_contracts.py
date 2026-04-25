@@ -621,8 +621,10 @@ def test_random_initial_configurations_dual_species(algo_cls) -> None:
     - Returned moves are in-bounds
     """
     if algo_cls.__name__ == "NaiveParHung":
-        pytest.skip("Skipping NaiveParHung for this dual-species random configuration test")
-        
+        pytest.skip(
+            "Skipping NaiveParHung for this dual-species random configuration test"
+        )
+
     algo = algo_cls()
     num_trials = 10
     array_size_list = [10]

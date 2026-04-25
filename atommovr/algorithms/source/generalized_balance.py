@@ -7,6 +7,7 @@ from atommovr.utils.Move import Move
 from atommovr.utils.move_utils import move_atoms
 from atommovr.algorithms.source.ejection import ejection
 
+
 def _normalize_final_size(matrix, final_size):
     """Return row and column bounds in the form
     (row_min, row_max, col_min, col_max).
@@ -35,6 +36,7 @@ def _normalize_final_size(matrix, final_size):
         )
 
     return row_min, row_max, col_min, col_max
+
 
 def generalized_balance(
     init_config,

@@ -53,7 +53,9 @@ class ParallelHungarian(Algorithm):
         if np.sum(atom_array.matrix) < np.sum(atom_array.target):
             return atom_array, [], False
         # If the atom array has already reached the target, return the same array, empty move list, and True for success flag.
-        if np.array_equal(atom_array.target, np.multiply(atom_array.matrix, atom_array.target)):
+        if np.array_equal(
+            atom_array.target, np.multiply(atom_array.matrix, atom_array.target)
+        ):
             return atom_array, [], True
         return parallel_Hungarian_algorithm_works(
             atom_array.matrix, atom_array.target, do_ejection, final_size, round_lim
@@ -85,7 +87,9 @@ class ParallelLBAP(Algorithm):
         if np.sum(atom_array.matrix) < np.sum(atom_array.target):
             return atom_array, [], False
         # If the atom array has already reached the target, return the same array, empty move list, and True for success flag.
-        if np.array_equal(atom_array.target, np.multiply(atom_array.matrix, atom_array.target)):
+        if np.array_equal(
+            atom_array.target, np.multiply(atom_array.matrix, atom_array.target)
+        ):
             return atom_array, [], True
         return parallel_LBAP_algorithm_works(
             atom_array.matrix, atom_array.target, do_ejection, round_lim
@@ -112,7 +116,9 @@ class GeneralizedBalance(Algorithm):
         if np.sum(atom_array.matrix) < np.sum(atom_array.target):
             return atom_array, [], False
         # If the atom array has already reached the target, return the same array, empty move list, and True for success flag.
-        if np.array_equal(atom_array.target, np.multiply(atom_array.matrix, atom_array.target)):
+        if np.array_equal(
+            atom_array.target, np.multiply(atom_array.matrix, atom_array.target)
+        ):
             return atom_array, [], True
         return generalized_balance(
             atom_array.matrix[:, :, 0], atom_array.target, do_ejection
@@ -144,7 +150,9 @@ class Hungarian(Algorithm):
         if np.sum(atom_array.matrix) < np.sum(atom_array.target):
             return atom_array, [], False
         # If the atom array has already reached the target, return the same array, empty move list, and True for success flag.
-        if np.array_equal(atom_array.target, np.multiply(atom_array.matrix, atom_array.target)):
+        if np.array_equal(
+            atom_array.target, np.multiply(atom_array.matrix, atom_array.target)
+        ):
             return atom_array, [], True
         return Hungarian_algorithm_works_fast(
             atom_array.matrix[:, :, 0], atom_array.target, do_ejection
@@ -170,7 +178,9 @@ class BCv2(Algorithm):
         if np.sum(atom_array.matrix) < np.sum(atom_array.target):
             return atom_array, [], False
         # If the atom array has already reached the target, return the same array, empty move list, and True for success flag.
-        if np.array_equal(atom_array.target, np.multiply(atom_array.matrix, atom_array.target)):
+        if np.array_equal(
+            atom_array.target, np.multiply(atom_array.matrix, atom_array.target)
+        ):
             return atom_array, [], True
         return bcv2(atom_array, do_ejection)
 
@@ -197,7 +207,9 @@ class BalanceAndCompact(Algorithm):
         if np.sum(atom_array.matrix) < np.sum(atom_array.target):
             return atom_array, [], False
         # If the atom array has already reached the target, return the same array, empty move list, and True for success flag.
-        if np.array_equal(atom_array.target, np.multiply(atom_array.matrix, atom_array.target)):
+        if np.array_equal(
+            atom_array.target, np.multiply(atom_array.matrix, atom_array.target)
+        ):
             return atom_array, [], True
         return balance_and_compact(
             atom_array.matrix[:, :, 0], atom_array.target, do_ejection
