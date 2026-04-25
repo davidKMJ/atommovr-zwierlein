@@ -12,6 +12,7 @@ from atommovr.utils.AtomArray import AtomArray
 from atommovr.algorithms.Algorithm_class import Algorithm
 from atommovr.algorithms.source.inside_out import inside_out_algorithm
 from atommovr.algorithms.source.naive_parallel_Hung import naive_par_Hung
+import numpy as np
 
 ###########################################
 # Existing algorithms from the literature #
@@ -32,6 +33,12 @@ class InsideOut(Algorithm):
         return "InsideOut"
 
     def get_moves(self, dual_sp_array: AtomArray):
+        # If the atom array does not have enough atoms, return the same array, empty move list, and False for success flag.
+        if (np.sum(dual_sp_array.matrix[:, :, 0]) < np.sum(dual_sp_array.target[:, :, 0])) or (np.sum(dual_sp_array.matrix[:, :, 1]) < np.sum(dual_sp_array.target[:, :, 1])):
+            return dual_sp_array, [], False
+        # If the atom array has already reached the target, return the same array, empty move list, and True for success flag.
+        if np.array_equal(dual_sp_array.target, np.multiply(dual_sp_array.matrix, dual_sp_array.target)):
+            return dual_sp_array, [], True
         return inside_out_algorithm(dual_sp_array)
 
 
@@ -44,4 +51,10 @@ class NaiveParHung(Algorithm):
         return "NaiveParHung"
 
     def get_moves(self, dual_sp_array: AtomArray):
+        # If the atom array does not have enough atoms, return the same array, empty move list, and False for success flag.
+        if (np.sum(dual_sp_array.matrix[:, :, 0]) < np.sum(dual_sp_array.target[:, :, 0])) or (np.sum(dual_sp_array.matrix[:, :, 1]) < np.sum(dual_sp_array.target[:, :, 1])):
+            return dual_sp_array, [], False
+        # If the atom array has already reached the target, return the same array, empty move list, and True for success flag.
+        if np.array_equal(dual_sp_array.target, np.multiply(dual_sp_array.matrix, dual_sp_array.target)):
+            return dual_sp_array, [], True
         return naive_par_Hung(dual_sp_array)
