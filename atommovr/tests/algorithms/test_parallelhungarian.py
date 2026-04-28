@@ -411,7 +411,7 @@ class TestTRANSFORM_PATHS_INTO_MOVES:
             support_mask, ok = find_destructive_support_mask_from_moves(matrix, group)
             assert ok
             assert not support_mask.any()
- 
+
     def test_matches_final_state_on_generated_paths_small_random_cases(self) -> None:
         """
         The fast transform should preserve the final state on generated path
