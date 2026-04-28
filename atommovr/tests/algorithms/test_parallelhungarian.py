@@ -411,6 +411,51 @@ class TestTRANSFORM_PATHS_INTO_MOVES:
             support_mask, ok = find_destructive_support_mask_from_moves(matrix, group)
             assert ok
             assert not support_mask.any()
+            
+    def test_matches_final_state_on_generated_paths_small_random_cases(self) -> None:
+        """
+        The fast transform should preserve the final state on generated path
+        sets, even if the returned batching is more compact than the legacy
+        batching.
+        """
+        rng = np.random.default_rng(0)
+
+        for side in [4, 5]:
+            for _ in range(20):
+                matrix = (rng.random((side, side)) < 0.25).astype(np.uint8, copy=False)
+                target = (rng.random((side, side)) < 0.25).astype(np.uint8, copy=False)
+
+                prepared_assignments = hw.generate_assignments(
+                    matrix.copy(), target.copy(), []
+                )
+                paths: list[list[list[Move]]] = []
+
+                for start, end in prepared_assignments[
+                    : min(4, len(prepared_assignments))
+                ]:
+                    path = hw.generate_path(matrix.copy(), start, end)
+                    if path != []:
+                        paths.append(path)
+
+                ref_matrix, ref_moves = hw.transform_paths_into_moves(
+                    matrix.copy(),
+                    _copy_path_structure(paths),
+                )
+                new_matrix, new_moves = hw.transform_paths_into_moves_fast(
+                    matrix.copy(),
+                    _copy_path_structure(paths),
+                )
+
+                assert np.array_equal(new_matrix, ref_matrix)
+
+                for group in new_moves:
+                    support_mask, ok = find_destructive_support_mask_from_moves(
+                        matrix, group
+                    )
+                    assert ok
+                    assert not support_mask.any()
+
+                assert len(new_moves) <= len(ref_moves)
 
     def test_matches_original_on_handcrafted_intersecting_paths(self) -> None:
         """
