@@ -21,7 +21,6 @@ from atommovr.utils.Move import Move, FailureEvent, FailureFlag
 from atommovr.utils.AtomArray import AtomArray
 from atommovr.utils.ErrorModel import ErrorModel
 from atommovr.utils.errormodels import UniformVacuumTweezerError, ZeroNoise
-from atommovr.utils.benchmarking import Benchmarking, BenchmarkingFigure
 
 __all__ = [
     ArrayGeometry,
@@ -46,6 +45,4 @@ __all__ = [
     ErrorModel,
     UniformVacuumTweezerError,
     ZeroNoise,
-    Benchmarking,
-    BenchmarkingFigure,
 ]

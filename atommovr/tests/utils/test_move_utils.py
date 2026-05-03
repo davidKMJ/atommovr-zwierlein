@@ -371,29 +371,6 @@ class TestMOVE_ATOMS:
                     m.fail_flag for m in ref_moves
                 ]
 
-
-# class TestMOVE_ATOMS_COMPAT_FAST:
-#     def test_matches_3d_fast_on_2d_projection(self) -> None:
-#         """
-#         Regression test: the Hungarian compatibility wrapper should preserve 2D
-#         behavior by promoting to 3D and squeezing back.
-#         """
-#         matrix_2d = np.zeros((4, 4), dtype=np.uint8)
-#         matrix_2d[0, 0] = 1
-#         matrix_2d[2, 2] = 1
-
-#         moves = [
-#             Move(0, 0, 0, 1),
-#             Move(2, 2, 3, 2),
-#         ]
-
-#         expected_3d, expected_meta = mu.move_atoms_fast(matrix_2d[:, :, None], moves)
-#         actual_2d, actual_meta = _move_atoms_compat_fast(matrix_2d.copy(), moves)
-
-#         assert np.array_equal(actual_2d, expected_3d[:, :, 0])
-#         assert actual_meta == expected_meta
-
-
 class TestAllocEventMask:
     def test_alloc_event_mask_shape_and_dtype(self) -> None:
         m = mu.alloc_event_mask(5)

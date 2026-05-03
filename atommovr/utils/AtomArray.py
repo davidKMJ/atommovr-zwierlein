@@ -78,7 +78,7 @@ class AtomArray:
     geom : ArrayGeometry
         Geometry of the array.
     shape : list[int, int]
-        Array shape given as ``[n_cols, n_rows]``.
+        Array shape given as ``[n_rows, n_cols]``.
     n_species : int
         Number of atomic species represented in the simulator.
     params : PhysicalParams
@@ -97,10 +97,10 @@ class AtomArray:
 
     Examples
     --------
-    >>> n_cols, n_rows = 10, 10
+    >>> n_rows, n_cols = 10, 10
     >>> error_model = UniformVacuumTweezerError()
     >>> tweezer_array = AtomArray(
-    ...     [n_cols, n_rows],
+    ...     [n_rows, n_cols],
     ...     n_species=1,
     ...     error_model=error_model,
     ... )
@@ -113,7 +113,7 @@ class AtomArray:
         params: PhysicalParams | None = None,
         error_model: ErrorModel | None = None,
         geom: ArrayGeometry = ArrayGeometry.RECTANGULAR,
-    ):
+    )-> None:
         self.geom = geom
         if params is None:
             params = PhysicalParams()
@@ -192,7 +192,7 @@ class AtomArray:
         pattern: Configurations = Configurations.CHECKERBOARD,
         middle_size: list | None = None,
         occupation_prob: float = 0.5,
-    ):
+    ) -> None:
         """
         Generate a target occupation pattern for the current array.
 

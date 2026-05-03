@@ -65,6 +65,7 @@ addopts = "--cov=atommovr --cov-report=term-missing"  # Coverage reporting
 markers = [
   "slow: slow statistical or long-running tests",
   "integration: end-to-end seam tests",
+  "performance: speed tests",
 ]
 # markers, python_files, and other pytest options can also go here
 
