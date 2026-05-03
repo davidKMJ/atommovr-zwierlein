@@ -401,7 +401,7 @@ class TestMoveAtomsSeams:
         move_set = [
             [Move(0, 0, 0, 1), Move(1, 0, 1, 1)],
             [Move(0, 1, 0, 2)],
-            [Move(2, 3, 4, 5), Move(9, 3, 9, 1), Move(1, 1, 1, 1)],
+            [Move(2, 4, 3, 5), Move(9, 3, 9, 2), Move(1, 1, 1, 1)],
         ]
 
         total_time, [n_parallel, n_non_parallel] = aa.evaluate_moves(move_set)
@@ -911,6 +911,301 @@ class TestMoveAtomsResults:
         expected_mat[:, :, 1] = np.array(
             [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]], dtype=np.uint8
         )
+        assert np.array_equal(array.matrix, expected_mat)
+
+    def test_REGRESSION_crunch_moves(self) -> None:
+        array = AtomArray(shape=[14, 14])
+        array.matrix[:, :, 0] = np.array(
+            [
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1],
+                [0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0],
+                [1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 0, 1, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0],
+                [1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 1],
+                [1, 0, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0],
+                [0, 0, 1, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            ],
+            dtype=np.uint8,
+        )
+        crunch_moves = [
+            Move(8, 0, 8, 1),
+            Move(8, 1, 8, 2),
+            Move(8, 2, 8, 3),
+            Move(8, 5, 8, 4),
+            Move(8, 6, 8, 5),
+            Move(8, 7, 8, 6),
+            Move(8, 8, 8, 7),
+            Move(8, 9, 8, 8),
+            Move(8, 10, 8, 9),
+            Move(8, 11, 8, 10),
+            Move(8, 12, 8, 11),
+            Move(8, 13, 8, 12),
+        ]
+        _ = array.move_atoms(move_list=crunch_moves)
+        expected_mat = np.zeros([14, 14, 1])
+        expected_mat[:, :, 0] = np.array(
+            [
+                [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                ],
+                [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                ],
+                [
+                    0,
+                    1,
+                    1,
+                    1,
+                    1,
+                    0,
+                    0,
+                    0,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                ],
+                [
+                    0,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    0,
+                    0,
+                    1,
+                    1,
+                    0,
+                ],
+                [
+                    0,
+                    0,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    0,
+                    1,
+                    0,
+                ],
+                [
+                    1,
+                    0,
+                    1,
+                    0,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    0,
+                    0,
+                ],
+                [
+                    1,
+                    0,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    0,
+                    1,
+                    1,
+                    0,
+                    1,
+                    0,
+                ],
+                [
+                    0,
+                    0,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    0,
+                    1,
+                    1,
+                    1,
+                    1,
+                    0,
+                ],
+                [
+                    0,
+                    1,
+                    1,
+                    1,
+                    0,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    0,
+                    1,
+                    0,
+                ],
+                [
+                    1,
+                    0,
+                    0,
+                    1,
+                    1,
+                    1,
+                    1,
+                    0,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    0,
+                ],
+                [
+                    0,
+                    0,
+                    1,
+                    1,
+                    0,
+                    1,
+                    0,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                ],
+                [
+                    0,
+                    0,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    0,
+                    0,
+                ],
+                [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    1,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    1,
+                    0,
+                ],
+                [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                ],
+            ],
+            dtype=np.uint8,
+        )
+        assert np.array_equal(array.matrix, expected_mat)
+
+    def test_REGRESSION_crunch_moves_single_row(self) -> None:
+        array = AtomArray(shape=[1, 14])
+        array.matrix[:, :, 0] = np.array(
+            [[1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 1]], dtype=np.uint8
+        )
+        expected_mat = np.zeros([1, 14, 1])
+        expected_mat[:, :, 0] = np.array(
+            [[0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 0]], dtype=np.uint8
+        )
+        crunch_moves = [
+            Move(0, 0, 0, 1),
+            Move(0, 1, 0, 2),
+            Move(0, 2, 0, 3),
+            Move(0, 5, 0, 4),
+            Move(0, 6, 0, 5),
+            Move(0, 7, 0, 6),
+            Move(0, 8, 0, 7),
+            Move(0, 9, 0, 8),
+            Move(0, 10, 0, 9),
+            Move(0, 11, 0, 10),
+            Move(0, 12, 0, 11),
+            Move(0, 13, 0, 12),
+        ]
+        _ = array.move_atoms(move_list=crunch_moves)
+
         assert np.array_equal(array.matrix, expected_mat)
 
 
@@ -1512,7 +1807,7 @@ class TestApplyMoves:
     def test_apply_moves_single_species_eject_success_removes_source_only(self) -> None:
         aa = _make_atomarray_single(np.array([[[1], [0], [0]]], dtype=np.uint8))
         # destination column 3 is out-of-bounds for shape (1,3)
-        moves = [Move(0, 0, 0, 3)]
+        moves = [Move(0, 0, 0, -1)]
 
         failed_inds, flags = aa._apply_moves_single_species(moves)
 

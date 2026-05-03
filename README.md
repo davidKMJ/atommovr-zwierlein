@@ -39,7 +39,7 @@ To make the virtual environment, navigate to the main folder and run the followi
 conda env create -f environment.yml
 ```
 
-# Acknowledgments   P
+# Acknowledgments
 
 ## Collaborators and discussions
 

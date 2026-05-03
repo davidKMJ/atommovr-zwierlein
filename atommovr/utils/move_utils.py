@@ -213,8 +213,10 @@ def get_AOD_cmds_from_move_list(
 
     if parallel_success_flag and verify:
         move_list = get_move_list_from_AOD_cmds(horiz_AOD_cmds, vert_AOD_cmds)
-        matrix_from_AOD = move_atoms_noiseless(copy.deepcopy(matrix), move_list)
-        matrix_from_seq = move_atoms_noiseless(copy.deepcopy(matrix), move_seq)
+        matrix_from_AOD = move_atoms_noiseless(
+            matrix.copy(), move_list
+        )  # took out copy.deepcopy
+        matrix_from_seq = move_atoms_noiseless(matrix.copy(), move_seq)
 
         if not np.array_equal(matrix_from_AOD, matrix_from_seq):
             parallel_success_flag = False
@@ -614,6 +616,10 @@ def detect_destructive_aod_cmd_mask(
 
     mask[:-1] |= (arr_int8[:-1] == 2) & (arr_int8[1:] == 3)
     mask[1:] |= (arr_int8[:-1] == 2) & (arr_int8[1:] == 3)
+
+    mask[:-2] |= (arr[:-2] == 2) & (arr[2:] == 3)
+    mask[1:-1] |= (arr[:-2] == 2) & (arr[2:] == 3)
+    mask[2:] |= (arr[:-2] == 2) & (arr[2:] == 3)
 
     return mask
 

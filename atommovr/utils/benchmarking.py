@@ -3,11 +3,11 @@
 import math
 import numpy as np
 import xarray as xr
-from typing import Union
 import matplotlib.pyplot as plt
 
 from atommovr.utils.errormodels import ZeroNoise, ErrorModel
 from atommovr.utils.core import (
+    _count_wrong_places,
     generate_random_target_configs,
     generate_random_init_configs,
     PhysicalParams,
@@ -15,7 +15,7 @@ from atommovr.utils.core import (
     CONFIGURATION_PLOT_LABELS,
 )
 from atommovr.utils.AtomArray import AtomArray
-from atommovr.algorithms.Algorithm_class import Algorithm, get_effective_target_grid
+from atommovr.algorithms.Algorithm_class import Algorithm
 
 
 def evaluate_moves(array: AtomArray, move_list: list):
@@ -349,7 +349,7 @@ class Benchmarking:
     def __init__(
         self,
         algos: list[Algorithm] | None = None,
-        target_configs: Union[list, np.ndarray, None] = None,
+        target_configs: list[Configurations] | None = None,
         error_models_list: list[ErrorModel] | None = None,
         phys_params_list: list[PhysicalParams] | None = None,
         sys_sizes: list[int] | None = None,
@@ -358,7 +358,7 @@ class Benchmarking:
         n_shots: int = 100,
         n_species: int = 1,
         check_sufficient_atoms: bool = True,
-    ):
+    ) -> None:
         """Initialize benchmarking sweeps over algorithms, targets, and system sizes.
 
         Parameters
@@ -366,8 +366,7 @@ class Benchmarking:
         algos : list of Algorithm, optional
             Algorithms to benchmark.
         target_configs : list or ndarray, optional
-            Target configurations as ``Configurations`` enums or explicit arrays. If an
-            ndarray, shape must be ``(len(sys_sizes), n_targets)``.
+            Target configurations as ``Configurations`` enums.
         error_models_list : list, optional
             Error models to evaluate.
         phys_params_list : list, optional
@@ -438,7 +437,7 @@ class Benchmarking:
                 "`target_configs` must be a list of Configuration objects or an np.ndarray."
             )
 
-    def save(self, savename):
+    def save(self, savename: str) -> None:
         """Persist benchmarking results to ``data/<savename>.nc``.
 
         Parameters
@@ -474,7 +473,7 @@ class Benchmarking:
         serializable_results.to_netcdf(f"data/{savename}.nc")
         print(f"Benchmarking object saved to `data/{savename}.nc`")
 
-    def load(self, loadname):
+    def load(self, loadname: str) -> None:
         """Load benchmarking results from ``data/<loadname>.nc`` into the object.
 
         Parameters
@@ -487,7 +486,7 @@ class Benchmarking:
         self.benchmarking_results = xr.open_dataset(f"data/{loadname}.nc")
         print(f"Data from `data/{loadname}.nc` loaded to `self.benchmarking_results`.")
 
-    def load_params_from_dataset(self, dataset: xr.Dataset):
+    def load_params_from_dataset(self, dataset: xr.Dataset) -> None:
         """Import sweep parameters from an existing benchmarking dataset.
 
         Parameters
@@ -514,7 +513,7 @@ class Benchmarking:
             self.rounds_list.append(int(round))
         self.n_shots = len(dataset["filling fraction"].values[0][0][0][0][0][0])
 
-    def set_observables(self, observables: list):
+    def set_observables(self, observables: list) -> None:
         """Set which observables should be plotted in downstream figures.
 
         Parameters
@@ -524,7 +523,7 @@ class Benchmarking:
         """
         self.figure_output.y_axis_variables = observables
 
-    def get_result_array_dims(self):
+    def get_result_array_dims(self) -> None:
         """Update bookkeeping for result array dimensions based on current sweeps."""
         self.n_algos = len(self.algos)
         if self.istargetlist:
@@ -552,7 +551,7 @@ class Benchmarking:
         self.n_parsets = len(self.phys_params_list)
         self.n_rounds = len(self.rounds_list)
 
-    def run(self, do_ejection: bool = False):
+    def run(self, do_ejection: bool = False) -> None:
         """Execute benchmarking sweeps and populate ``self.benchmarking_results``.
 
         Parameters
@@ -765,7 +764,9 @@ class Benchmarking:
         if self.istargetlist:
             if pattern != Configurations.RANDOM:
                 self.tweezer_array.generate_target(
-                    pattern, occupation_prob=self.tweezer_array.params.loading_prob
+                    pattern,
+                    occupation_prob=self.tweezer_array.params.loading_prob,
+                    middle_size=self.tweezer_array.params.middle_size,
                 )
 
         for shot in range(self.n_shots):
@@ -843,35 +844,12 @@ class Benchmarking:
             )
 
             # Identify wrong places (atoms that are not in the target configuration)
-            if do_ejection:
-                wrong_places.append(
-                    int(
-                        np.sum(
-                            np.abs(
-                                self.tweezer_array.matrix - self.tweezer_array.target
-                            )
-                        )
-                    )
+            wrong_places.append(
+                _count_wrong_places(
+                    self.tweezer_array.matrix, self.tweezer_array.target, do_ejection
                 )
-            else:
-                start_row, end_row, start_col, end_col = get_effective_target_grid(
-                    self.tweezer_array.target
-                )
-                wrong_places.append(
-                    int(
-                        np.sum(
-                            np.abs(
-                                self.tweezer_array.matrix[
-                                    start_row : end_row + 1, start_col : end_col + 1
-                                ]
-                                - self.tweezer_array.target[
-                                    start_row : end_row + 1, start_col : end_col + 1
-                                ]
-                            )
-                        )
-                    )
-                )
-            # Count atoms in array
+            )
+
             atoms_in_arrays.append(int(np.sum(self.tweezer_array.matrix)))
             atoms_in_targets.append(int(np.sum(self.tweezer_array.target)))
 
@@ -890,7 +868,7 @@ class Benchmarking:
             float(np.mean(sufficient_flags)),
         )
 
-    def plot_results(self, save=False, savename=None):
+    def plot_results(self, save: bool = False, savename: str | None = None) -> None:
         """Dispatch plotting based on ``figure_output.figure_type``.
 
         Parameters
