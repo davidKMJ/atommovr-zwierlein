@@ -134,6 +134,9 @@ class BCv2(Algorithm):
 
     Supported configurations: `Configurations.MIDDLE_FILL`"""
 
+    def __init__(self, batch_fractions: list[float] | None = None) -> None:
+        self.batch_fractions = batch_fractions
+
     def __repr__(self):
         return "Balance & Compact"
 
@@ -142,7 +145,7 @@ class BCv2(Algorithm):
             raise ValueError(
                 f"Single-species algorithm cannot process atom array with {atom_array.n_species} species."
             )
-        return bcv2(atom_array, do_ejection)
+        return bcv2(atom_array, do_ejection, self.batch_fractions)
 
 
 # Balance and Compact
