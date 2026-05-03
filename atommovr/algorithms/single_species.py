@@ -166,6 +166,9 @@ class BCv2(Algorithm):
 
     Supported configurations: `Configurations.MIDDLE_FILL`"""
 
+    def __init__(self, batch_fractions: list[float] | None = None) -> None:
+        self.batch_fractions = batch_fractions
+
     def __repr__(self):
         return "Balance & Compact"
 
@@ -182,7 +185,7 @@ class BCv2(Algorithm):
             atom_array.target, np.multiply(atom_array.matrix, atom_array.target)
         ):
             return atom_array, [], True
-        return bcv2(atom_array, do_ejection)
+        return bcv2(atom_array, do_ejection, self.batch_fraction)
 
 
 # Balance and Compact

@@ -76,6 +76,9 @@ class PhysicalParams:
         If the target configuration is random, the probability that a site in the
         configuration will be occupied by an atom. Must be in range [0, 1].
         Default is 0.5.
+    middle_size : list[int], optional
+        The desired size of the target (in rows, columns). If none is specified
+        it will be automatically calculated.
     Attributes
     ----------
         Spacing between adjacent atoms in the square array, in m.
@@ -96,6 +99,7 @@ class PhysicalParams:
         spacing: float = 5e-6,
         loading_prob: float = 0.6,
         target_occup_prob: float = 0.5,
+        middle_size: list[int] | None = None,
     ) -> None:
         # array parameters
         self.spacing = spacing
@@ -105,6 +109,7 @@ class PhysicalParams:
             raise ValueError("Variable `target_occup_prob` must be in range [0,1].")
         self.loading_prob = loading_prob
         self.target_occup_prob = target_occup_prob
+        self.middle_size = middle_size
 
         # tweezer parameters
         self.AOD_speed = AOD_speed
@@ -148,6 +153,27 @@ class ArrayGeometry(IntEnum):
 #############
 # Functions #
 #############
+
+
+def _count_wrong_places(
+    matrix: np.ndarray, target: np.ndarray, do_ejection: bool
+) -> int:
+    """Counts the number of unfilled target sites in an atom array."""
+    if do_ejection:
+        return _int_sum(np.count_nonzero(matrix != target))
+    required = target == 1
+    return _int_sum(np.count_nonzero(matrix[required] != 1))
+
+
+def _int_sum(x: np.ndarray) -> int:
+    """Return ``int(np.sum(x))`` with a signed accumulation dtype.
+
+    Notes
+    -----
+    This avoids unsigned underflow/overflow bugs when subtracting counts that come
+    from uint-typed occupancy arrays (e.g., ``np.uint8``).
+    """
+    return int(np.sum(x, dtype=np.int64))
 
 
 def _coerce_rng(rng: np.random.Generator | None) -> np.random.Generator:

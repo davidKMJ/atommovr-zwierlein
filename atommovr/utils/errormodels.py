@@ -87,23 +87,6 @@ class ZeroNoise(ErrorModel):
         new_state = state.copy()
         return new_state, loss_flag
 
-    # def get_move_errors(self, state: np.ndarray, moves: list[Move]) -> list:
-    #     """
-    #     Given a set of moves and the current state, assigns
-    #     an attribute `failure_flag` to the move.
-    #     - If the move suceeds, `move_failure_flag = 0`.
-    #     - If the move fails but the atom remains in its original position,
-    #     `move.failure_flag = 1`.
-    #     - If the move fails and the atom is also ejected,
-    #     `move_failure_flag = 2`.
-
-    #     For this noise model, it sets all failure flags to 0.
-    #     """
-    #     for move in moves:
-    #         move.failure_flag = 0
-
-    #     return moves
-
 
 class UniformVacuumTweezerError(ErrorModel):
     """
@@ -191,28 +174,3 @@ class UniformVacuumTweezerError(ErrorModel):
                 f"Parameter 'n_species' must be either 1 or 2, not {n_species}."
             )
         return new_state, loss_flag
-
-        # def get_move_errors(self, state: np.ndarray, moves: list[Move], putdown_events: set, pickup_events: set) -> list[Move]:
-
-    #     """
-    #     Given a set of moves and the current state, assigns
-    #     an attribute `failure_flag` to the move.
-    #     - If the move suceeds, `move_failure_flag = 0`.
-    #     - If the move fails but the atom remains in its original position,
-    #     `move.failure_flag = 1`.
-    #     - If the move fails and the atom is also ejected,
-    #     `move_failure_flag = 2`.
-
-    #     In this error model, we uniformly sample from a probability distribution
-    #     specified by the class attributes `pickup_fail_rate` and
-    #     `putdown_fail_rate`.
-    #     """
-
-    #     move_fails = random.choices([0, 1, 2],
-    #                                 weights=[1-self.pickup_fail_rate-self.putdown_fail_rate,
-    #                                 self.pickup_fail_rate,
-    #                                 self.putdown_fail_rate],
-    #                                 k = len(moves))
-    #     for move_index, move in enumerate(moves):
-    #         move.failure_flag = move_fails[move_index]
-    #     return moves
