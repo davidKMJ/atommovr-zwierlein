@@ -74,6 +74,8 @@ class Move:
 
         self.dx = to_col - from_col
         self.dy = to_row - from_row
+        if self.dx > 1 or self.dx < -1 or self.dy > 1 or self.dy < -1:
+            raise ValueError('An individual move cannot displace an atom by more than one array site in either direction.')
 
         self.distance = self._get_distance()
         self.midx, self.midy = self._get_move_midpoint()
