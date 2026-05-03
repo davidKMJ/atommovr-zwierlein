@@ -862,10 +862,20 @@ class Benchmarking:
             atoms_in_arrays.append(int(np.sum(self.tweezer_array.matrix)))
             atoms_in_targets.append(int(np.sum(self.tweezer_array.target)))
 
-            if np.sum(initial_config) < np.sum(self.tweezer_array.target):
-                sufficient_flags.append(False)
+            if self.tweezer_array.n_species == 1:
+                if np.sum(initial_config) < np.sum(self.tweezer_array.target):
+                    sufficient_flags.append(False)
+                else:
+                    sufficient_flags.append(True)
             else:
-                sufficient_flags.append(True)
+                if np.sum(initial_config[:, :, 0]) < np.sum(
+                    self.tweezer_array.target[:, :, 0]
+                ) or np.sum(initial_config[:, :, 1]) < np.sum(
+                    self.tweezer_array.target[:, :, 1]
+                ):
+                    sufficient_flags.append(False)
+                else:
+                    sufficient_flags.append(True)
 
         return (
             float(np.mean(success_flags)),
