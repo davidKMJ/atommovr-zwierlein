@@ -10,8 +10,8 @@ from atommovr.utils.AtomArray import AtomArray
 from atommovr.utils.errormodels import ZeroNoise
 from atommovr.utils.move_utils import move_atoms_noiseless, get_move_list_from_AOD_cmds
 from atommovr.algorithms.source.bc_controller_helpers import (
-    _int_sum, 
-    _as_2d_state, 
+    _int_sum,
+    _as_2d_state,
     move_across_rows,
     get_all_moves_btwn_rows_cols,
     compress_move_rounds_conservative,
@@ -21,14 +21,16 @@ from atommovr.algorithms.source.ejection import ejection
 BALANCE_BATCH_FRACTION: float = 0.8
 PREBALANCE_BATCH_FRACTION: float = 0.8
 
+
 def stable_digest(arr) -> str:
     return hashlib.sha256(arr.tobytes()).hexdigest()
 
+
 def bcv2(
-    array: AtomArray, 
-    do_ejection: bool = False, 
-    batch_fractions: list[float] | None = None
-) -> tuple[NDArray[np.uint8],list[list[Move]],bool]:
+    array: AtomArray,
+    do_ejection: bool = False,
+    batch_fractions: list[float] | None = None,
+) -> tuple[NDArray[np.uint8], list[list[Move]], bool]:
     """
     Third iteration of the Balance and Compact algorithm
     (originally proposed for optical lattices).
@@ -49,30 +51,24 @@ def bcv2(
 
     # 1. prebalance (making sure target rows/cols have enough atoms)
     master_move_list, success_flag = prebalance(
-        arr1.matrix, 
-        arr1.target, 
-        batch_size_fraction = batch_fractions[0]
+        arr1.matrix, arr1.target, batch_size_fraction=batch_fractions[0]
     )
     master_move_list = compress_move_rounds_conservative(
-        init_mat_copy, 
-        master_move_list
+        init_mat_copy, master_move_list
     )
 
     _, _ = arr1.evaluate_moves(master_move_list)
     if success_flag:
         # 2. balance (distributing atoms between target rows according to needs)
-        assignments = get_all_balance_assignments(
-            start_row, 
-            end_row
-        )
+        assignments = get_all_balance_assignments(start_row, end_row)
         for assignment in assignments:
             try:
                 bal_moves = balance_rows(
-                    arr1.matrix, 
-                    arr1.target, 
-                    assignment[0], 
-                    assignment[1], 
-                    balance_batch_fraction = batch_fractions[1]
+                    arr1.matrix,
+                    arr1.target,
+                    assignment[0],
+                    assignment[1],
+                    balance_batch_fraction=batch_fractions[1],
                 )
                 if assignment[0] != assignment[1] and len(bal_moves) > 0:
                     _, _ = arr1.evaluate_moves(bal_moves)
@@ -85,7 +81,7 @@ def bcv2(
             com_moves = compact(arr1)
         except ValueError:
             return arr1.matrix, master_move_list, False
-        
+
         if len(com_moves) > 0:
             _, _ = arr1.evaluate_moves(com_moves)
             master_move_list.extend(com_moves)
@@ -110,6 +106,7 @@ def bcv2(
             success_flag = True
 
     return arr1.matrix, master_move_list, success_flag
+
 
 def choose_best_atom_set_1d(
     init_config: np.ndarray,
@@ -239,7 +236,12 @@ def choose_best_atom_set_1d(
 
     while first_list_ind + right_count + n_targets < n_atoms:
         right_atom_set: np.ndarray = atom_indices[
-            first_list_ind + right_count + 1 : first_list_ind + right_count + n_targets + 1
+            first_list_ind
+            + right_count
+            + 1 : first_list_ind
+            + right_count
+            + n_targets
+            + 1
         ]
         dist_right: int = find_largest_dist_to_move(target_indices, right_atom_set)
         if dist_right > dist_r_current:
@@ -256,7 +258,12 @@ def choose_best_atom_set_1d(
 
     while first_list_ind - left_count - 1 >= 0:
         left_atom_set: np.ndarray = atom_indices[
-            first_list_ind - left_count - 1 : first_list_ind - left_count + n_targets - 1
+            first_list_ind
+            - left_count
+            - 1 : first_list_ind
+            - left_count
+            + n_targets
+            - 1
         ]
         dist_left: int = find_largest_dist_to_move(target_indices, left_atom_set)
         if dist_left > dist_l_current:
@@ -339,7 +346,9 @@ def first_round_edges_for_best_set(
 
     atom_col: int
     target_col: int
-    for atom_col, target_col in zip(chosen_atoms.tolist(), target_indices.tolist(), strict=True):
+    for atom_col, target_col in zip(
+        chosen_atoms.tolist(), target_indices.tolist(), strict=True
+    ):
         if atom_col < target_col:
             edges.add((int(atom_col), int(atom_col + 1)))
         elif atom_col > target_col:
@@ -347,7 +356,10 @@ def first_round_edges_for_best_set(
 
     return edges
 
-def special_case_algo_1d(init_config: np.ndarray, target_config: np.ndarray) -> tuple[list,list]:
+
+def special_case_algo_1d(
+    init_config: np.ndarray, target_config: np.ndarray
+) -> tuple[list, list]:
     arr_copy = AtomArray(np.shape(init_config)[:2])
     arr_copy.target = copy.deepcopy(target_config)
     arr_copy.matrix = copy.deepcopy(init_config)
@@ -475,13 +487,20 @@ def middle_fill_algo_1d(
     first_list_ind: int = int(first_matches[0])
 
     # Explore candidate contiguous atom sets to the right.
-    current_r_atom_set: np.ndarray = atom_indices[first_list_ind : first_list_ind + n_targets]
+    current_r_atom_set: np.ndarray = atom_indices[
+        first_list_ind : first_list_ind + n_targets
+    ]
     dist_r_current: int = find_largest_dist_to_move(target_indices, current_r_atom_set)
     right_count: int = 0
 
     while first_list_ind + right_count + n_targets < n_atoms:
         right_atom_set: np.ndarray = atom_indices[
-            first_list_ind + right_count + 1 : first_list_ind + right_count + n_targets + 1
+            first_list_ind
+            + right_count
+            + 1 : first_list_ind
+            + right_count
+            + n_targets
+            + 1
         ]
         dist_right: int = find_largest_dist_to_move(target_indices, right_atom_set)
         if dist_right > dist_r_current:
@@ -491,13 +510,20 @@ def middle_fill_algo_1d(
         right_count += 1
 
     # Explore candidate contiguous atom sets to the left.
-    current_l_atom_set: np.ndarray = atom_indices[first_list_ind : first_list_ind + n_targets]
+    current_l_atom_set: np.ndarray = atom_indices[
+        first_list_ind : first_list_ind + n_targets
+    ]
     dist_l_current: int = find_largest_dist_to_move(target_indices, current_l_atom_set)
     left_count: int = 0
 
     while first_list_ind - left_count - 1 >= 0:
         left_atom_set: np.ndarray = atom_indices[
-            first_list_ind - left_count - 1 : first_list_ind - left_count + n_targets - 1
+            first_list_ind
+            - left_count
+            - 1 : first_list_ind
+            - left_count
+            + n_targets
+            - 1
         ]
         dist_left: int = find_largest_dist_to_move(target_indices, left_atom_set)
         if dist_left > dist_l_current:
@@ -524,7 +550,9 @@ def middle_fill_algo_1d(
         for i, pair in enumerate(pairs):
             target_index, atom_index = pair
             if target_index != atom_index:
-                new_atom_index: int = int(atom_index + np.sign(target_index - atom_index))
+                new_atom_index: int = int(
+                    atom_index + np.sign(target_index - atom_index)
+                )
                 move: Move = Move(0, atom_index, 0, new_atom_index)
                 move_list.append(move)
                 pairs[i] = (target_index, new_atom_index)
@@ -538,7 +566,9 @@ def middle_fill_algo_1d(
 
     return move_set, best_atom_set.tolist()
 
+
 # Balance and Compact
+
 
 def _target_col_bounds_for_rows(
     target_config: np.ndarray,
@@ -590,7 +620,7 @@ def balance_rows(
     target_config: np.ndarray,
     i: int,
     j: int,
-    balance_batch_fraction: float = BALANCE_BATCH_FRACTION
+    balance_batch_fraction: float = BALANCE_BATCH_FRACTION,
 ) -> list[list[Move]]:
     """
     Balance atom supply between the two child halves of ``[i, j]``.
@@ -730,6 +760,7 @@ def balance_rows(
         )
 
     return move_rounds
+
 
 def prebalance(
     init_config: np.ndarray,
@@ -900,6 +931,7 @@ def prebalance(
 
     return all_rounds, True
 
+
 def get_all_moves_btwn_rows_from_rows(
     from_row: np.ndarray,
     to_row: np.ndarray,
@@ -1069,6 +1101,7 @@ def get_all_moves_btwn_cols(init_config, from_col_ind, to_col_ind):
 
     return moves, len(moves)
 
+
 def get_all_balance_assignments(start, end):
     assignments = []
     i = start
@@ -1121,6 +1154,7 @@ def get_target_locs(array):
 
     return int(rr.min()), int(cc.min()), int(rr.max()), int(cc.max())
 
+
 def _compact_state_signature(matrix: np.ndarray) -> bytes:
     """
     Return a hashable signature for compact-cycle detection.
@@ -1155,6 +1189,7 @@ def _target_overlap_count(matrix: np.ndarray, target: np.ndarray) -> int:
         Number of occupied target sites.
     """
     return int(np.sum(matrix * target, dtype=np.int64))
+
 
 def compact(array) -> list[list[Move]]:
     """
@@ -1444,7 +1479,9 @@ def compact(array) -> list[list[Move]]:
             if len(move_list) == 0:
                 continue
 
-            after_state: np.ndarray = move_atoms_noiseless(before_matrix.copy(), move_list)
+            after_state: np.ndarray = move_atoms_noiseless(
+                before_matrix.copy(), move_list
+            )
             state_changed: bool = not np.array_equal(before_matrix, after_state)
             if not state_changed:
                 continue

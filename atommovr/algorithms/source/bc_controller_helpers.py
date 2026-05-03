@@ -6,10 +6,15 @@ import pandas as pd
 from typing import Final, Any, Literal
 
 from atommovr.utils.Move import Move
-from atommovr.utils.move_utils import move_atoms_noiseless, get_AOD_cmds_from_move_list, get_move_list_from_AOD_cmds
+from atommovr.utils.move_utils import (
+    move_atoms_noiseless,
+    get_AOD_cmds_from_move_list,
+    get_move_list_from_AOD_cmds,
+)
 from atommovr.utils.core import _int_sum
 
 ## Low-level helpers
+
 
 def _as_2d_state(state: np.ndarray) -> np.ndarray:
     """
@@ -30,6 +35,7 @@ def _as_2d_state(state: np.ndarray) -> np.ndarray:
     raise ValueError(
         f"BCv2 expected 2D or (rows, cols, 1) single-species state; got shape {arr.shape}."
     )
+
 
 ## Helpers for compressing move lists
 
@@ -64,7 +70,8 @@ def _try_apply_round(
         return move_atoms_noiseless(state.copy(), round_moves)
     except Exception:
         return None
-    
+
+
 def _has_unique_move_endpoints(round_moves: list[Move]) -> bool:
     """
     Return whether a simultaneous round uses unique sources and destinations.
@@ -142,7 +149,7 @@ def _try_decode_parallel_block(
         horiz_cmds, vert_cmds, parallel_success_flag = get_AOD_cmds_from_move_list(
             matrix=matrix_2d,
             move_seq=flat_moves,
-            verify=False, #True
+            verify=False,  # True
         )
     except Exception:
         return None
@@ -243,7 +250,9 @@ def compress_move_rounds_conservative(
         merge_ok: bool = False
         decoded_trial_state: np.ndarray | None = None
 
-        if decoded_trial_round is not None and _has_unique_move_endpoints(decoded_trial_round):
+        if decoded_trial_round is not None and _has_unique_move_endpoints(
+            decoded_trial_round
+        ):
             sequential_trial_state: np.ndarray = _replay_rounds(
                 state=candidate_start_state.copy(),
                 move_rounds=trial_block,
@@ -252,9 +261,8 @@ def compress_move_rounds_conservative(
                 state=candidate_start_state.copy(),
                 round_moves=decoded_trial_round,
             )
-            merge_ok = (
-                decoded_trial_state is not None
-                and np.array_equal(decoded_trial_state, sequential_trial_state)
+            merge_ok = decoded_trial_state is not None and np.array_equal(
+                decoded_trial_state, sequential_trial_state
             )
 
         if merge_ok:
@@ -283,7 +291,9 @@ def compress_move_rounds_conservative(
     compressed_rounds.append(candidate_decoded_round)
     return compressed_rounds
 
+
 ## Helpers for calculating S, R, and T
+
 
 def source_supply_at_boundary(
     state: np.ndarray,
@@ -405,7 +415,7 @@ def direct_cut_capacity(
         return 0
 
     n_cols: int = int(src_row.size)
-    neg_inf: int = -10**9
+    neg_inf: int = -(10**9)
 
     # Bit 0: unresolved source at column c remains available to c+1.
     # Bit 1: unresolved vacancy at column c remains available to c+1.
@@ -566,10 +576,10 @@ def perform_transfer(
 
     moves_run: list[Move] = [
         Move(
-        boundary_src_row,
-        int(src_col),
-        boundary_dst_row,
-        int(dst_col),
+            boundary_src_row,
+            int(src_col),
+            boundary_dst_row,
+            int(dst_col),
         )
         for src_col, dst_col in zip(from_cols[:n_run], to_cols[:n_run], strict=True)
     ]
@@ -706,6 +716,7 @@ def _pure_mode_matches(
     to_cols = src_local + 1
     return from_cols, to_cols, int(from_cols.size)
 
+
 def _optimal_local_matches(
     from_row: np.ndarray,
     free_mask: np.ndarray,
@@ -760,7 +771,7 @@ def _optimal_local_matches(
     #   bit 0 -> unresolved source at column c remains available for c + 1
     #   bit 1 -> unresolved vacancy at column c remains available for c + 1
     n_states: Final[int] = 4
-    neg_inf: int = -10**9
+    neg_inf: int = -(10**9)
 
     scores: np.ndarray = np.full(n_states, neg_inf, dtype=np.int64)
     scores[0] = 0
@@ -796,9 +807,11 @@ def _optimal_local_matches(
                 (((c - 1), c),) if prev_src_open and vac_here else (),
                 ((c, (c - 1)),) if src_here and prev_vac_open else (),
                 ((c, c),) if src_here and vac_here else (),
-                (((c - 1), c), (c, (c - 1)))
-                if prev_src_open and vac_here and src_here and prev_vac_open
-                else (),
+                (
+                    (((c - 1), c), (c, (c - 1)))
+                    if prev_src_open and vac_here and src_here and prev_vac_open
+                    else ()
+                ),
             )
 
             for edges in local_choices:
@@ -913,9 +926,7 @@ def _vacancy_center_twice(free_mask: np.ndarray) -> int:
     vacancy_cols: np.ndarray = np.flatnonzero(free_mask).astype(np.intp, copy=False)
     if vacancy_cols.size == 0:
         raise ValueError("free_mask must contain at least one vacancy.")
-    return int(
-        2 * np.sum(vacancy_cols, dtype=np.int64) // int(vacancy_cols.size)
-    )
+    return int(2 * np.sum(vacancy_cols, dtype=np.int64) // int(vacancy_cols.size))
 
 
 def _plan_truncation_order(
@@ -1018,10 +1029,15 @@ def _subset_score(
     fixed mode rank.
     """
     centrality_penalty: int = int(
-        np.sum(np.abs(2 * to_cols.astype(np.int64) - vacancy_center_twice), dtype=np.int64)
+        np.sum(
+            np.abs(2 * to_cols.astype(np.int64) - vacancy_center_twice), dtype=np.int64
+        )
     )
     move_distance_penalty: int = int(
-        np.sum(np.abs(to_cols.astype(np.int64) - from_cols.astype(np.int64)), dtype=np.int64)
+        np.sum(
+            np.abs(to_cols.astype(np.int64) - from_cols.astype(np.int64)),
+            dtype=np.int64,
+        )
     )
     return centrality_penalty, move_distance_penalty, mode_rank
 
@@ -1104,7 +1120,9 @@ def get_all_moves_btwn_rows_cols(
         return empty, empty, 0
 
     max_possible: int = min(src_count, vac_count)
-    n_target: int = max_possible if n_transfer_needed == 0 else min(max_possible, n_transfer_needed)
+    n_target: int = (
+        max_possible if n_transfer_needed == 0 else min(max_possible, n_transfer_needed)
+    )
     vacancy_center_twice: int = _vacancy_center_twice(free_mask)
 
     pure_modes: list[tuple[np.ndarray, np.ndarray, int, int]] = []
@@ -1114,7 +1132,9 @@ def get_all_moves_btwn_rows_cols(
         pure_from: np.ndarray
         pure_to: np.ndarray
         pure_n: int
-        pure_from, pure_to, pure_n = _pure_mode_matches(from_row, free_mask, shift=shift)
+        pure_from, pure_to, pure_n = _pure_mode_matches(
+            from_row, free_mask, shift=shift
+        )
         pure_modes.append((pure_from, pure_to, pure_n, mode_rank))
 
     # Fast path:
@@ -1171,7 +1191,9 @@ def get_all_moves_btwn_rows_cols(
     )
     return chosen_from, chosen_to, n_chosen
 
-## 
+
+##
+
 
 def _status_dict(
     kind: str,
@@ -1211,7 +1233,9 @@ def _interval_bounds(
 
 def _vacancy_center_twice_from_row(target_row: np.ndarray) -> int:
     """Return twice the arithmetic mean of vacancy columns on a target row."""
-    vacancy_cols: np.ndarray = np.flatnonzero(target_row == 0).astype(np.intp, copy=False)
+    vacancy_cols: np.ndarray = np.flatnonzero(target_row == 0).astype(
+        np.intp, copy=False
+    )
     if vacancy_cols.size == 0:
         raise ValueError("target_row must contain at least one vacancy.")
     return int(2 * np.sum(vacancy_cols, dtype=np.int64) // int(vacancy_cols.size))
@@ -1277,8 +1301,7 @@ def _apply_vertical_round(
         return state.copy(), []
 
     moves: list[Move] = [
-        Move(int(from_row), int(col), int(to_row), int(col))
-        for col in cols.tolist()
+        Move(int(from_row), int(col), int(to_row), int(col)) for col in cols.tolist()
     ]
     new_state: np.ndarray = move_atoms_noiseless(state.copy(), moves)
     return new_state, moves
@@ -1410,7 +1433,9 @@ def _relay_exact_to_target(
         )
 
     blocking_row_raw: int | str | None = deeper_status["blocking_row"]
-    blocking_row: int | None = None if blocking_row_raw is None else int(blocking_row_raw)
+    blocking_row: int | None = (
+        None if blocking_row_raw is None else int(blocking_row_raw)
+    )
     if blocking_row is None:
         blocking_row = upstream_row
 
@@ -1421,20 +1446,26 @@ def _relay_exact_to_target(
         _status_dict("partial_blocked", blocking_row, remaining_need),
     )
 
+
 def relay_exact(
     work_state: np.ndarray,
     target_row: int,
     delta_needed: int,
     step_toward_boundary: int,
     low_row: int,
-    high_row: int
-    ) -> tuple[np.ndarray, list[list[Move]], int, dict[str, int | str | None]]:
+    high_row: int,
+) -> tuple[np.ndarray, list[list[Move]], int, dict[str, int | str | None]]:
     if delta_needed == 0:
         return work_state.copy(), [], 0, _status_dict("success", None, 0)
 
     upstream_row: int = target_row - step_toward_boundary
     if upstream_row < low_row or upstream_row > high_row:
-        return work_state.copy(), [], 0, _status_dict("partial_blocked", target_row, delta_needed)
+        return (
+            work_state.copy(),
+            [],
+            0,
+            _status_dict("partial_blocked", target_row, delta_needed),
+        )
 
     moved_state, moved_now_round, moved_now = perform_transfer(
         work_state,
@@ -1454,11 +1485,21 @@ def relay_exact(
 
     upstream_supply: int = _count_row_atoms(moved_state, upstream_row)
     if upstream_supply >= remaining_need:
-        return moved_state, rounds, achieved, _status_dict("partial_blocked", target_row, remaining_need)
+        return (
+            moved_state,
+            rounds,
+            achieved,
+            _status_dict("partial_blocked", target_row, remaining_need),
+        )
 
     next_upstream_row: int = upstream_row - step_toward_boundary
     if next_upstream_row < low_row or next_upstream_row > high_row:
-        return moved_state, rounds, achieved, _status_dict("partial_blocked", upstream_row, remaining_need)
+        return (
+            moved_state,
+            rounds,
+            achieved,
+            _status_dict("partial_blocked", upstream_row, remaining_need),
+        )
 
     deficit_into_upstream: int = int(remaining_need - upstream_supply)
     moved_state, deeper_rounds, _, deeper_status = relay_exact(
@@ -1487,13 +1528,25 @@ def relay_exact(
 
     upstream_supply_now: int = _count_row_atoms(moved_state, upstream_row)
     if upstream_supply_now >= remaining_need:
-        return moved_state, rounds, achieved, _status_dict("partial_blocked", target_row, remaining_need)
+        return (
+            moved_state,
+            rounds,
+            achieved,
+            _status_dict("partial_blocked", target_row, remaining_need),
+        )
 
     blocking_row_raw: int | str | None = deeper_status["blocking_row"]
-    blocking_row: int | None = None if blocking_row_raw is None else int(blocking_row_raw)
+    blocking_row: int | None = (
+        None if blocking_row_raw is None else int(blocking_row_raw)
+    )
     if blocking_row is None:
         blocking_row = upstream_row
-    return moved_state, rounds, achieved, _status_dict("partial_blocked", blocking_row, remaining_need)
+    return (
+        moved_state,
+        rounds,
+        achieved,
+        _status_dict("partial_blocked", blocking_row, remaining_need),
+    )
 
 
 def ensure_source_supply(
@@ -1546,7 +1599,9 @@ def ensure_source_supply(
         )
 
     initial_state: np.ndarray = state.copy()
-    initial_boundary_supply: int = source_supply_at_boundary(initial_state, boundary_src_row)
+    initial_boundary_supply: int = source_supply_at_boundary(
+        initial_state, boundary_src_row
+    )
 
     if delta_S == 0:
         return initial_state, [], 0, _status_dict("success", None, 0)
@@ -1562,7 +1617,6 @@ def ensure_source_supply(
     if global_upstream_atoms < delta_S:
         return initial_state, [], 0, _status_dict("insufficient_atoms", None, delta_S)
 
-    
     if fill_mode == "exact":
         new_state, move_rounds, achieved_delta_S, status = relay_exact(
             initial_state,
@@ -1572,7 +1626,10 @@ def ensure_source_supply(
             low_row=low_row,
             high_row=high_row,
         )
-        actual_delta: int = source_supply_at_boundary(new_state, boundary_src_row) - initial_boundary_supply
+        actual_delta: int = (
+            source_supply_at_boundary(new_state, boundary_src_row)
+            - initial_boundary_supply
+        )
         if actual_delta != achieved_delta_S:
             raise RuntimeError(
                 "ensure_source_supply exact-mode bookkeeping mismatch: "
@@ -1600,7 +1657,9 @@ def ensure_source_supply(
     for round_moves in exact_rounds:
         if len(round_moves) == 0:
             raise RuntimeError("Exact relay plan contains an empty move round.")
-        planned_interfaces.append((int(round_moves[0].from_row), int(round_moves[0].to_row)))
+        planned_interfaces.append(
+            (int(round_moves[0].from_row), int(round_moves[0].to_row))
+        )
 
     n_cols: int = int(state.shape[1])
     for from_row_i, to_row_i in planned_interfaces:
@@ -1612,19 +1671,28 @@ def ensure_source_supply(
         )
         opportunistic_rounds.append(opp_round)
 
-    achieved_delta_S = source_supply_at_boundary(opportunistic_state, boundary_src_row) - initial_boundary_supply
+    achieved_delta_S = (
+        source_supply_at_boundary(opportunistic_state, boundary_src_row)
+        - initial_boundary_supply
+    )
     if achieved_delta_S >= delta_S:
         status = _status_dict("success", None, 0)
     else:
         unmet_delta_S: int = max(0, int(delta_S - achieved_delta_S))
         if exact_status["kind"] == "partial_blocked":
             blocking_row_raw: int | str | None = exact_status["blocking_row"]
-            blocking_row: int | None = None if blocking_row_raw is None else int(blocking_row_raw)
+            blocking_row: int | None = (
+                None if blocking_row_raw is None else int(blocking_row_raw)
+            )
             status = _status_dict("partial_blocked", blocking_row, unmet_delta_S)
         else:
             status = _status_dict(
                 str(exact_status["kind"]),
-                None if exact_status["blocking_row"] is None else int(exact_status["blocking_row"]),
+                (
+                    None
+                    if exact_status["blocking_row"] is None
+                    else int(exact_status["blocking_row"])
+                ),
                 unmet_delta_S,
             )
     return opportunistic_state, opportunistic_rounds, achieved_delta_S, status
@@ -1652,10 +1720,13 @@ def _iter_local_matching_choices(
         (((c - 1), c),) if prev_src_open and vac_here else (),
         ((c, (c - 1)),) if src_here and prev_vac_open else (),
         ((c, c),) if src_here and vac_here else (),
-        (((c - 1), c), (c, (c - 1)))
-        if prev_src_open and vac_here and src_here and prev_vac_open
-        else (),
+        (
+            (((c - 1), c), (c, (c - 1)))
+            if prev_src_open and vac_here and src_here and prev_vac_open
+            else ()
+        ),
     )
+
 
 def _choose_target_vacancy_mask_for_horizontal_capacity(
     src_row: np.ndarray,
@@ -1712,7 +1783,7 @@ def _choose_target_vacancy_mask_for_horizontal_capacity(
         vac_mask: np.ndarray,
     ) -> int:
         """Return exact local cut capacity for a source row and vacancy mask."""
-        neg_inf_local: int = -10**9
+        neg_inf_local: int = -(10**9)
         scores_local: np.ndarray = np.full(4, neg_inf_local, dtype=np.int64)
         scores_local[0] = 0
 
@@ -1731,8 +1802,8 @@ def _choose_target_vacancy_mask_for_horizontal_capacity(
 
                 next_src_open_local: bool = src_here_local
                 next_vac_open_local: bool = vac_here_local
-                next_state_bits_local: int = (
-                    int(next_src_open_local) | (int(next_vac_open_local) << 1)
+                next_state_bits_local: int = int(next_src_open_local) | (
+                    int(next_vac_open_local) << 1
                 )
                 if base_score_local > int(next_scores_local[next_state_bits_local]):
                     next_scores_local[next_state_bits_local] = base_score_local
@@ -1740,28 +1811,34 @@ def _choose_target_vacancy_mask_for_horizontal_capacity(
                 if prev_src_open_local and vac_here_local:
                     next_src_open_local = src_here_local
                     next_vac_open_local = False
-                    next_state_bits_local = (
-                        int(next_src_open_local) | (int(next_vac_open_local) << 1)
+                    next_state_bits_local = int(next_src_open_local) | (
+                        int(next_vac_open_local) << 1
                     )
-                    if base_score_local + 1 > int(next_scores_local[next_state_bits_local]):
+                    if base_score_local + 1 > int(
+                        next_scores_local[next_state_bits_local]
+                    ):
                         next_scores_local[next_state_bits_local] = base_score_local + 1
 
                 if src_here_local and prev_vac_open_local:
                     next_src_open_local = False
                     next_vac_open_local = vac_here_local
-                    next_state_bits_local = (
-                        int(next_src_open_local) | (int(next_vac_open_local) << 1)
+                    next_state_bits_local = int(next_src_open_local) | (
+                        int(next_vac_open_local) << 1
                     )
-                    if base_score_local + 1 > int(next_scores_local[next_state_bits_local]):
+                    if base_score_local + 1 > int(
+                        next_scores_local[next_state_bits_local]
+                    ):
                         next_scores_local[next_state_bits_local] = base_score_local + 1
 
                 if src_here_local and vac_here_local:
                     next_src_open_local = False
                     next_vac_open_local = False
-                    next_state_bits_local = (
-                        int(next_src_open_local) | (int(next_vac_open_local) << 1)
+                    next_state_bits_local = int(next_src_open_local) | (
+                        int(next_vac_open_local) << 1
                     )
-                    if base_score_local + 1 > int(next_scores_local[next_state_bits_local]):
+                    if base_score_local + 1 > int(
+                        next_scores_local[next_state_bits_local]
+                    ):
                         next_scores_local[next_state_bits_local] = base_score_local + 1
 
                 if (
@@ -1772,10 +1849,12 @@ def _choose_target_vacancy_mask_for_horizontal_capacity(
                 ):
                     next_src_open_local = False
                     next_vac_open_local = False
-                    next_state_bits_local = (
-                        int(next_src_open_local) | (int(next_vac_open_local) << 1)
+                    next_state_bits_local = int(next_src_open_local) | (
+                        int(next_vac_open_local) << 1
                     )
-                    if base_score_local + 2 > int(next_scores_local[next_state_bits_local]):
+                    if base_score_local + 2 > int(
+                        next_scores_local[next_state_bits_local]
+                    ):
                         next_scores_local[next_state_bits_local] = base_score_local + 2
 
             scores_local = next_scores_local
@@ -1786,7 +1865,7 @@ def _choose_target_vacancy_mask_for_horizontal_capacity(
     if current_capacity >= target_capacity:
         return cur_vac.copy()
 
-    neg_inf: int = -10**9
+    neg_inf: int = -(10**9)
     large_disp: int = 10**9
     n_states: int = 4
 
@@ -1830,20 +1909,14 @@ def _choose_target_vacancy_mask_for_horizontal_capacity(
     # Precomputed local transition templates.
     # Each tuple is:
     # (used_prev_src, used_src_here, used_prev_vac, used_vac_here, match_gain)
-    _LOCAL_TRANSITIONS: dict[tuple[bool, bool, bool, bool], tuple[tuple[int, int, int, int, int], ...]] = {
+    _LOCAL_TRANSITIONS: dict[
+        tuple[bool, bool, bool, bool], tuple[tuple[int, int, int, int, int], ...]
+    ] = {
         (False, False, False, False): ((0, 0, 0, 0, 0),),
-        (False, False, False, True): (
-            (0, 0, 0, 0, 0),  # no edge
-        ),
-        (False, False, True, False): (
-            (0, 0, 0, 0, 0),  # no edge
-        ),
-        (False, False, True, True): (
-            (0, 0, 0, 0, 0),  # no edge
-        ),
-        (False, True, False, False): (
-            (0, 0, 0, 0, 0),  # no edge
-        ),
+        (False, False, False, True): ((0, 0, 0, 0, 0),),  # no edge
+        (False, False, True, False): ((0, 0, 0, 0, 0),),  # no edge
+        (False, False, True, True): ((0, 0, 0, 0, 0),),  # no edge
+        (False, True, False, False): ((0, 0, 0, 0, 0),),  # no edge
         (False, True, False, True): (
             (0, 0, 0, 0, 0),  # no edge
             (0, 1, 0, 1, 1),  # C: c -> c
@@ -1857,23 +1930,17 @@ def _choose_target_vacancy_mask_for_horizontal_capacity(
             (0, 1, 1, 0, 1),  # B
             (0, 1, 0, 1, 1),  # C
         ),
-        (True, False, False, False): (
-            (0, 0, 0, 0, 0),  # no edge
-        ),
+        (True, False, False, False): ((0, 0, 0, 0, 0),),  # no edge
         (True, False, False, True): (
             (0, 0, 0, 0, 0),  # no edge
             (1, 0, 0, 1, 1),  # A: c-1 -> c
         ),
-        (True, False, True, False): (
-            (0, 0, 0, 0, 0),  # no edge
-        ),
+        (True, False, True, False): ((0, 0, 0, 0, 0),),  # no edge
         (True, False, True, True): (
             (0, 0, 0, 0, 0),  # no edge
             (1, 0, 0, 1, 1),  # A
         ),
-        (True, True, False, False): (
-            (0, 0, 0, 0, 0),  # no edge
-        ),
+        (True, True, False, False): ((0, 0, 0, 0, 0),),  # no edge
         (True, True, False, True): (
             (0, 0, 0, 0, 0),  # no edge
             (1, 0, 0, 1, 1),  # A
@@ -1912,7 +1979,9 @@ def _choose_target_vacancy_mask_for_horizontal_capacity(
 
             for match_count in range(match_upper + 1):
                 for state_bits in range(n_states):
-                    base_overlap: int = int(overlap_scores[v_used, match_count, state_bits])
+                    base_overlap: int = int(
+                        overlap_scores[v_used, match_count, state_bits]
+                    )
                     if base_overlap == neg_inf:
                         continue
                     base_disp: int = int(disp_costs[v_used, match_count, state_bits])
@@ -1944,34 +2013,49 @@ def _choose_target_vacancy_mask_for_horizontal_capacity(
                         ) in transitions:
                             next_src_open: bool = src_here and (not bool(used_src_here))
                             next_vac_open: bool = vac_here and (not bool(used_vac_here))
-                            next_state_bits: int = (
-                                int(next_src_open) | (int(next_vac_open) << 1)
+                            next_state_bits: int = int(next_src_open) | (
+                                int(next_vac_open) << 1
                             )
 
                             new_match_count_raw: int = match_count + match_gain
-                            new_match_count: int = min(target_capacity, new_match_count_raw)
+                            new_match_count: int = min(
+                                target_capacity, new_match_count_raw
+                            )
                             cand_overlap: int = base_overlap + overlap_gain
                             cand_disp: int = base_disp + disp_gain
 
                             old_overlap: int = int(
-                                next_overlap[new_v_used, new_match_count, next_state_bits]
+                                next_overlap[
+                                    new_v_used, new_match_count, next_state_bits
+                                ]
                             )
                             old_disp: int = int(
                                 next_disp[new_v_used, new_match_count, next_state_bits]
                             )
-                            cand_better: bool = (
-                                cand_overlap > old_overlap
-                                or (cand_overlap == old_overlap and cand_disp < old_disp)
+                            cand_better: bool = cand_overlap > old_overlap or (
+                                cand_overlap == old_overlap and cand_disp < old_disp
                             )
                             if not cand_better:
                                 continue
 
-                            next_overlap[new_v_used, new_match_count, next_state_bits] = cand_overlap
-                            next_disp[new_v_used, new_match_count, next_state_bits] = cand_disp
-                            prev_v_used_table[c, new_v_used, new_match_count, next_state_bits] = v_used
-                            prev_match_table[c, new_v_used, new_match_count, next_state_bits] = match_count
-                            prev_state_table[c, new_v_used, new_match_count, next_state_bits] = state_bits
-                            vac_choice_table[c, new_v_used, new_match_count, next_state_bits] = int(vac_here)
+                            next_overlap[
+                                new_v_used, new_match_count, next_state_bits
+                            ] = cand_overlap
+                            next_disp[new_v_used, new_match_count, next_state_bits] = (
+                                cand_disp
+                            )
+                            prev_v_used_table[
+                                c, new_v_used, new_match_count, next_state_bits
+                            ] = v_used
+                            prev_match_table[
+                                c, new_v_used, new_match_count, next_state_bits
+                            ] = match_count
+                            prev_state_table[
+                                c, new_v_used, new_match_count, next_state_bits
+                            ] = state_bits
+                            vac_choice_table[
+                                c, new_v_used, new_match_count, next_state_bits
+                            ] = int(vac_here)
 
         overlap_scores, next_overlap = next_overlap, overlap_scores
         disp_costs, next_disp = next_disp, disp_costs
@@ -2020,6 +2104,7 @@ def _choose_target_vacancy_mask_for_horizontal_capacity(
     target_vac_rev.reverse()
     return np.asarray(target_vac_rev, dtype=np.bool_)
 
+
 def _choose_target_vacancy_mask_for_horizontal_capacity_slow(
     src_row: np.ndarray,
     dst_row: np.ndarray,
@@ -2065,7 +2150,7 @@ def _choose_target_vacancy_mask_for_horizontal_capacity_slow(
     if n_vac == 0:
         return None
 
-    neg_inf: int = -10**9
+    neg_inf: int = -(10**9)
     n_states: int = 4
     # max_matches: int = min(int(np.sum(src_row, dtype=np.int64)), n_vac)
 
@@ -2116,7 +2201,9 @@ def _choose_target_vacancy_mask_for_horizontal_capacity_slow(
         for v_used in range(n_vac + 1):
             for match_count in range(target_capacity + 1):
                 for state_bits in range(n_states):
-                    base_overlap: int = int(overlap_scores[v_used, match_count, state_bits])
+                    base_overlap: int = int(
+                        overlap_scores[v_used, match_count, state_bits]
+                    )
                     if base_overlap == neg_inf:
                         continue
                     base_disp: int = int(disp_costs[v_used, match_count, state_bits])
@@ -2184,28 +2271,49 @@ def _choose_target_vacancy_mask_for_horizontal_capacity_slow(
 
                             next_src_open: bool = src_here and (not used_src_here)
                             next_vac_open: bool = vac_here and (not used_vac_here)
-                            next_state_bits: int = int(next_src_open) | (int(next_vac_open) << 1)
+                            next_state_bits: int = int(next_src_open) | (
+                                int(next_vac_open) << 1
+                            )
 
                             new_match_count_raw: int = match_count + len(edges)
-                            new_match_count: int = min(target_capacity, new_match_count_raw)
+                            new_match_count: int = min(
+                                target_capacity, new_match_count_raw
+                            )
                             cand_overlap: int = base_overlap + overlap_gain
                             cand_disp: int = base_disp + disp_gain
 
-                            old_overlap: int = int(next_overlap[new_v_used, new_match_count, next_state_bits])
-                            old_disp: int = int(next_disp[new_v_used, new_match_count, next_state_bits])
-                            cand_better: bool = (
-                                cand_overlap > old_overlap
-                                or (cand_overlap == old_overlap and cand_disp < old_disp)
+                            old_overlap: int = int(
+                                next_overlap[
+                                    new_v_used, new_match_count, next_state_bits
+                                ]
+                            )
+                            old_disp: int = int(
+                                next_disp[new_v_used, new_match_count, next_state_bits]
+                            )
+                            cand_better: bool = cand_overlap > old_overlap or (
+                                cand_overlap == old_overlap and cand_disp < old_disp
                             )
                             if not cand_better:
                                 continue
 
-                            next_overlap[new_v_used, new_match_count, next_state_bits] = cand_overlap
-                            next_disp[new_v_used, new_match_count, next_state_bits] = cand_disp
-                            prev_v_used_table[c, new_v_used, new_match_count, next_state_bits] = v_used
-                            prev_match_table[c, new_v_used, new_match_count, next_state_bits] = match_count
-                            prev_state_table[c, new_v_used, new_match_count, next_state_bits] = state_bits
-                            vac_choice_table[c, new_v_used, new_match_count, next_state_bits] = int(vac_here)
+                            next_overlap[
+                                new_v_used, new_match_count, next_state_bits
+                            ] = cand_overlap
+                            next_disp[new_v_used, new_match_count, next_state_bits] = (
+                                cand_disp
+                            )
+                            prev_v_used_table[
+                                c, new_v_used, new_match_count, next_state_bits
+                            ] = v_used
+                            prev_match_table[
+                                c, new_v_used, new_match_count, next_state_bits
+                            ] = match_count
+                            prev_state_table[
+                                c, new_v_used, new_match_count, next_state_bits
+                            ] = state_bits
+                            vac_choice_table[
+                                c, new_v_used, new_match_count, next_state_bits
+                            ] = int(vac_here)
 
         overlap_scores = next_overlap
         disp_costs = next_disp
@@ -2250,11 +2358,9 @@ def _choose_target_vacancy_mask_for_horizontal_capacity_slow(
     return np.asarray(target_vac_rev, dtype=np.bool_)
 
 
-
 def _target_row_from_vacancy_mask(vacancy_mask: np.ndarray) -> np.ndarray:
     """Return the occupancy row corresponding to a boolean vacancy mask."""
     return (~vacancy_mask).astype(np.uint8, copy=False)
-
 
 
 def _plan_horizontal_rounds_to_target(
@@ -2312,12 +2418,16 @@ def _plan_horizontal_rounds_to_target(
 
         left_indices: list[int] = [
             idx
-            for idx, (cur_col, tgt_col) in enumerate(zip(work_cols, target_cols, strict=True))
+            for idx, (cur_col, tgt_col) in enumerate(
+                zip(work_cols, target_cols, strict=True)
+            )
             if cur_col > tgt_col
         ]
         right_indices: list[int] = [
             idx
-            for idx, (cur_col, tgt_col) in enumerate(zip(work_cols, target_cols, strict=True))
+            for idx, (cur_col, tgt_col) in enumerate(
+                zip(work_cols, target_cols, strict=True)
+            )
             if cur_col < tgt_col
         ]
 
@@ -2366,7 +2476,6 @@ def _plan_horizontal_rounds_to_target(
             "Horizontal row planner exceeded its round budget before reaching the target pattern."
         )
     return move_rounds
-
 
 
 def _moves_touch_outside_target(
@@ -2449,7 +2558,9 @@ def ensure_boundary_row_cut_capacity_horizontal(
 
     initial_state: np.ndarray = state.copy()
     dst_count_before: int = _count_row_atoms(initial_state, boundary_dst_row)
-    t_before: int = direct_cut_capacity(initial_state, boundary_src_row, boundary_dst_row)
+    t_before: int = direct_cut_capacity(
+        initial_state, boundary_src_row, boundary_dst_row
+    )
 
     if delta_T == 0:
         return (
@@ -2468,7 +2579,9 @@ def ensure_boundary_row_cut_capacity_horizontal(
         )
 
     src_supply: int = _count_row_atoms(initial_state, boundary_src_row)
-    dst_vacancies: int = int(np.sum(initial_state[boundary_dst_row, :, 0] == 0, dtype=np.int64))
+    dst_vacancies: int = int(
+        np.sum(initial_state[boundary_dst_row, :, 0] == 0, dtype=np.int64)
+    )
     horizontal_ceiling: int = min(src_supply, dst_vacancies)
     target_capacity: int = int(t_before + delta_T)
 
@@ -2488,16 +2601,22 @@ def ensure_boundary_row_cut_capacity_horizontal(
             },
         )
 
-    src_row: np.ndarray = initial_state[boundary_src_row, :, 0].astype(np.bool_, copy=False)
-    dst_row: np.ndarray = initial_state[boundary_dst_row, :, 0].astype(np.uint8, copy=True)
+    src_row: np.ndarray = initial_state[boundary_src_row, :, 0].astype(
+        np.bool_, copy=False
+    )
+    dst_row: np.ndarray = initial_state[boundary_dst_row, :, 0].astype(
+        np.uint8, copy=True
+    )
 
-    chosen_vac_mask: np.ndarray | None = _choose_target_vacancy_mask_for_horizontal_capacity(
-        src_row=src_row,
-        dst_row=dst_row,
-        target_capacity=target_capacity,
-        target_start_col=target_start_col,
-        target_end_col=target_end_col,
-        preserve_outside_target=True,
+    chosen_vac_mask: np.ndarray | None = (
+        _choose_target_vacancy_mask_for_horizontal_capacity(
+            src_row=src_row,
+            dst_row=dst_row,
+            target_capacity=target_capacity,
+            target_start_col=target_start_col,
+            target_end_col=target_end_col,
+            preserve_outside_target=True,
+        )
     )
     preserve_outside_target: bool = True
     if chosen_vac_mask is None:
@@ -2561,7 +2680,9 @@ def ensure_boundary_row_cut_capacity_horizontal(
             "Horizontal boundary helper changed the destination boundary-row atom count."
         )
 
-    status_kind: str = "success" if achieved_delta_T >= delta_T else "cannot_solve_within_constraints"
+    status_kind: str = (
+        "success" if achieved_delta_T >= delta_T else "cannot_solve_within_constraints"
+    )
     status: dict[str, int | bool | str] = {
         "kind": status_kind,
         "T_before": int(t_before),
@@ -2887,33 +3008,36 @@ def ensure_boundary_row_cut_capacity_vertical(
     )
     return work_state, move_rounds, achieved_delta_t, status
 
+
 def _make_status(
-        kind: str,
-        t_before: int,
-        t_after: int,
-        requested_delta_t: int,
-        achieved_delta_t: int,
-        n_rounds: int,
-        chosen_mode: str,
-        horizontal_status_kind: str | None,
-        vertical_status_kind: str | None,
-        blocking_row: int | None,
-        used_outside_target_cols: bool | None,
-    ) -> dict[str, int | str | bool | None]:
-        """Build the structured coordinator status payload."""
-        return {
-            "kind": kind,
-            "T_before": int(t_before),
-            "T_after": int(t_after),
-            "requested_delta_T": int(requested_delta_t),
-            "achieved_delta_T": int(achieved_delta_t),
-            "n_rounds": int(n_rounds),
-            "chosen_mode": chosen_mode,
-            "horizontal_status_kind": horizontal_status_kind,
-            "vertical_status_kind": vertical_status_kind,
-            "blocking_row": blocking_row,
-            "used_outside_target_cols": used_outside_target_cols,
-        }
+    kind: str,
+    t_before: int,
+    t_after: int,
+    requested_delta_t: int,
+    achieved_delta_t: int,
+    n_rounds: int,
+    chosen_mode: str,
+    horizontal_status_kind: str | None,
+    vertical_status_kind: str | None,
+    blocking_row: int | None,
+    used_outside_target_cols: bool | None,
+) -> dict[str, int | str | bool | None]:
+    """Build the structured coordinator status payload."""
+    return {
+        "kind": kind,
+        "T_before": int(t_before),
+        "T_after": int(t_after),
+        "requested_delta_T": int(requested_delta_t),
+        "achieved_delta_T": int(achieved_delta_t),
+        "n_rounds": int(n_rounds),
+        "chosen_mode": chosen_mode,
+        "horizontal_status_kind": horizontal_status_kind,
+        "vertical_status_kind": vertical_status_kind,
+        "blocking_row": blocking_row,
+        "used_outside_target_cols": used_outside_target_cols,
+    }
+
+
 def ensure_cut_capacity(
     state: np.ndarray,
     boundary_src_row: int,
@@ -3021,9 +3145,7 @@ def ensure_cut_capacity(
     )
 
     horiz_kind: str = str(horiz_status["kind"])
-    horiz_used_outside: bool = bool(
-        horiz_status.get("used_outside_target_cols", False)
-    )
+    horiz_used_outside: bool = bool(horiz_status.get("used_outside_target_cols", False))
 
     horizontal_finishes_in_one_round: bool = (
         horiz_kind == "success"
@@ -3324,6 +3446,8 @@ def ensure_cut_capacity(
             used_outside_target_cols=horiz_used_outside,
         ),
     )
+
+
 # -----------------------------------------------------------------------------
 # Small controller helpers moved to module scope
 # -----------------------------------------------------------------------------
@@ -3431,6 +3555,7 @@ def _move_across_rows_state_signature(
     """
     return int(remaining_R), state.tobytes()
 
+
 def move_across_rows_old(
     state: np.ndarray,
     boundary_src_row: int,
@@ -3441,7 +3566,9 @@ def move_across_rows_old(
     C: float,
     target_start_col: int,
     target_end_col: int,
-) -> tuple[np.ndarray, list[list[Move]], int, dict[str, int | float | str | bool | None]]:
+) -> tuple[
+    np.ndarray, list[list[Move]], int, dict[str, int | float | str | bool | None]
+]:
     """
     Transfer atoms across a single source/destination row cut using helper-guided control.
 
@@ -3757,7 +3884,9 @@ def move_across_rows(
     C: float,
     target_start_col: int,
     target_end_col: int,
-) -> tuple[np.ndarray, list[list[Move]], int, dict[str, int | float | str | bool | None]]:
+) -> tuple[
+    np.ndarray, list[list[Move]], int, dict[str, int | float | str | bool | None]
+]:
     """
     Transfer atoms across a single source/destination row cut using helper-guided control.
 
@@ -3994,10 +4123,9 @@ def move_across_rows(
             child_boundary_src_row: int = boundary_src_row + step_away_from_target
 
             child_is_in_bounds: bool = 0 <= child_boundary_src_row < n_rows
-            child_has_smaller_span: bool = (
-                abs(source_search_limit_row - child_boundary_src_row)
-                < abs(source_search_limit_row - boundary_src_row)
-            )
+            child_has_smaller_span: bool = abs(
+                source_search_limit_row - child_boundary_src_row
+            ) < abs(source_search_limit_row - boundary_src_row)
 
             if (
                 child_is_in_bounds
@@ -4112,6 +4240,7 @@ def move_across_rows(
 
 
 ## debuggers
+
 
 @dataclass
 class MoveAcrossRowsTraceStep:
@@ -4308,11 +4437,13 @@ def trace_move_across_rows(
 
         if S < batch_goal:
             req: int = max(0, batch_goal - S)
-            source_state, source_rounds, source_achieved, source_status = ensure_source_supply(
-                state=work_state,
-                boundary_src_row=boundary_src_row,
-                search_limit_row=source_search_limit_row,
-                delta_S=req,
+            source_state, source_rounds, source_achieved, source_status = (
+                ensure_source_supply(
+                    state=work_state,
+                    boundary_src_row=boundary_src_row,
+                    search_limit_row=source_search_limit_row,
+                    delta_S=req,
+                )
             )
             source_kind: str = str(source_status["kind"])
 

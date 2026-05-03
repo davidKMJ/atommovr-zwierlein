@@ -99,12 +99,15 @@ class TestMove:
         assert move.dx == 0
         assert move.dy == 0
 
-    @pytest.mark.parametrize(['from_row', 'from_col', 'to_row', 'to_col'],
-                             [[1, 0, 3, 1],
-                              [3, 2, 2, 0]])
-    def test_move_raises_on_greater_than_one_displacement(self, from_row, from_col, to_row, to_col):
+    @pytest.mark.parametrize(
+        ["from_row", "from_col", "to_row", "to_col"], [[1, 0, 3, 1], [3, 2, 2, 0]]
+    )
+    def test_move_raises_on_greater_than_one_displacement(
+        self, from_row, from_col, to_row, to_col
+    ):
         with pytest.raises(ValueError):
             _ = Move(from_row, from_col, to_row, to_col)
+
 
 class TestMoveType:
     def test_enum_values(self):

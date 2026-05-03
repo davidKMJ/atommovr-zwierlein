@@ -371,6 +371,7 @@ class TestMOVE_ATOMS:
                     m.fail_flag for m in ref_moves
                 ]
 
+
 class TestAllocEventMask:
     def test_alloc_event_mask_shape_and_dtype(self) -> None:
         m = mu.alloc_event_mask(5)

@@ -13,7 +13,6 @@ from typing import Any, Callable, ParamSpec, TypeVar, cast
 
 import numpy as np
 
-
 P = ParamSpec("P")
 R = TypeVar("R")
 
@@ -204,7 +203,8 @@ def timed(
             wrapper._last_timing_record = record
             logger(f"[timed] {timing_label}: {_format_seconds(elapsed)}")
             return result
-        wrapper._last_timing_record : TimingRecord | None = None
+
+        wrapper._last_timing_record: TimingRecord | None = None
 
         return cast(Callable[P, R], wrapper)
 
@@ -293,6 +293,7 @@ def benchmarked(
                 f"n={record.count}"
             )
             return result
+
         wrapper._last_timing_record: TimingRecord | None = None
 
         return cast(Callable[P, R], wrapper)
@@ -354,7 +355,9 @@ def profiled(
                 profiler.dump_stats(str(dump_path))
 
             buffer: io.StringIO = io.StringIO()
-            stats: pstats.Stats = pstats.Stats(profiler, stream=buffer).sort_stats(sort_by)
+            stats: pstats.Stats = pstats.Stats(profiler, stream=buffer).sort_stats(
+                sort_by
+            )
             stats.print_stats(lines)
             # setattr(wrapper, "_last_cprofile_text", buffer.getvalue())
             wrapper._last_cprofile_text = buffer.getvalue()
@@ -364,6 +367,7 @@ def profiled(
                 f"(sorted by {sort_by}, top {lines} lines)\n{buffer.getvalue()}"
             )
             return result
+
         wrapper._last_cprofile_text: str | None = None
 
         return cast(Callable[P, R], wrapper)
@@ -426,6 +430,7 @@ def line_profiled(
 
             logger(f"[line_profiled] {func.__qualname__}\n{buffer.getvalue()}")
             return result
+
         wrapper._last_line_profile_text: str | None = None
 
         return cast(Callable[P, R], wrapper)

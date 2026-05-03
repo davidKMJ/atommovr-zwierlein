@@ -77,7 +77,7 @@ class PhysicalParams:
         configuration will be occupied by an atom. Must be in range [0, 1].
         Default is 0.5.
     middle_size : list[int], optional
-        The desired size of the target (in rows, columns). If none is specified 
+        The desired size of the target (in rows, columns). If none is specified
         it will be automatically calculated.
     Attributes
     ----------
@@ -154,12 +154,16 @@ class ArrayGeometry(IntEnum):
 # Functions #
 #############
 
-def _count_wrong_places(matrix: np.ndarray, target: np.ndarray, do_ejection: bool) -> int:
+
+def _count_wrong_places(
+    matrix: np.ndarray, target: np.ndarray, do_ejection: bool
+) -> int:
     """Counts the number of unfilled target sites in an atom array."""
     if do_ejection:
         return _int_sum(np.count_nonzero(matrix != target))
-    required = (target == 1)
+    required = target == 1
     return _int_sum(np.count_nonzero(matrix[required] != 1))
+
 
 def _int_sum(x: np.ndarray) -> int:
     """Return ``int(np.sum(x))`` with a signed accumulation dtype.
@@ -170,6 +174,7 @@ def _int_sum(x: np.ndarray) -> int:
     from uint-typed occupancy arrays (e.g., ``np.uint8``).
     """
     return int(np.sum(x, dtype=np.int64))
+
 
 def _coerce_rng(rng: np.random.Generator | None) -> np.random.Generator:
     """Return a numpy Generator, creating a fresh one if None."""

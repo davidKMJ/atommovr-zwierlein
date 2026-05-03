@@ -764,9 +764,9 @@ class Benchmarking:
         if self.istargetlist:
             if pattern != Configurations.RANDOM:
                 self.tweezer_array.generate_target(
-                    pattern, 
+                    pattern,
                     occupation_prob=self.tweezer_array.params.loading_prob,
-                    middle_size = self.tweezer_array.params.middle_size,
+                    middle_size=self.tweezer_array.params.middle_size,
                 )
 
         for shot in range(self.n_shots):
@@ -844,9 +844,11 @@ class Benchmarking:
             )
 
             # Identify wrong places (atoms that are not in the target configuration)
-            wrong_places.append(_count_wrong_places(self.tweezer_array.matrix,
-                                                    self.tweezer_array.target,
-                                                    do_ejection))
+            wrong_places.append(
+                _count_wrong_places(
+                    self.tweezer_array.matrix, self.tweezer_array.target, do_ejection
+                )
+            )
 
             atoms_in_arrays.append(int(np.sum(self.tweezer_array.matrix)))
             atoms_in_targets.append(int(np.sum(self.tweezer_array.target)))

@@ -16,6 +16,7 @@ from atommovr.tests.support.helpers import (
 )
 from atommovr.utils.AtomArray import AtomArray
 
+
 def _make_single_row_case(
     atom_cols: list[int],
     target_cols: list[int],
@@ -27,6 +28,7 @@ def _make_single_row_case(
     init_config[0, atom_cols, 0] = np.uint8(1)
     target_config[0, target_cols, 0] = np.uint8(1)
     return init_config, target_config
+
 
 def _make_atom_array(
     matrix_2d: np.ndarray,
@@ -40,7 +42,6 @@ def _make_atom_array(
     arr.matrix = matrix_2d.astype(np.uint8, copy=False).reshape(n_rows, n_cols, 1)
     arr.target = target_2d.astype(np.uint8, copy=False).reshape(n_rows, n_cols, 1)
     return arr
-
 
 
 def _serialize_move_rounds(
@@ -82,6 +83,7 @@ def _make_random_prebalance_case(
 
     return init, target
 
+
 def _half_counts(
     state: np.ndarray,
     target: np.ndarray,
@@ -95,7 +97,6 @@ def _half_counts(
     top_req: int = bc_new._int_sum(target[i:m, :, :])
     bot_req: int = bc_new._int_sum(target[m : j + 1, :, :])
     return m, top_atoms, bot_atoms, top_req, bot_req
-
 
 
 def _make_random_balance_case(
@@ -124,7 +125,6 @@ def _make_random_balance_case(
     return init, target
 
 
-
 def _make_row_sufficient_case(
     rng: np.random.Generator,
     n_rows: int,
@@ -148,6 +148,7 @@ def _make_row_sufficient_case(
         matrix_2d[row, cols] = np.uint8(1)
 
     return matrix_2d, target_2d
+
 
 def _sample_center_biased_size(
     rng: np.random.Generator,
@@ -185,6 +186,7 @@ def _sample_center_biased_size(
     weights: np.ndarray = decay ** np.abs(support - int(center))
     probs: np.ndarray = weights / np.sum(weights, dtype=np.float64)
     return int(rng.choice(support, p=probs))
+
 
 def _make_random_bcv2_feasible_case(
     rng: np.random.Generator,
@@ -233,6 +235,7 @@ def _make_random_bcv2_feasible_case(
 
     return matrix_2d, target_2d
 
+
 def _time_function(
     func: Callable,
     *args: object,
@@ -247,7 +250,6 @@ def _time_function(
         if dt < best:
             best = dt
     return best
-
 
 
 def _legacy_special_case_algo_1d(
@@ -281,7 +283,9 @@ def _legacy_special_case_algo_1d(
             atom_index: int
             target_index, atom_index = pair
             if target_index != atom_index:
-                new_atom_index: int = int(atom_index + np.sign(target_index - atom_index))
+                new_atom_index: int = int(
+                    atom_index + np.sign(target_index - atom_index)
+                )
                 move_list.append(movr.Move(0, atom_index, 0, new_atom_index))
                 pairs[k] = (target_index, new_atom_index)
         if move_list != []:
@@ -290,7 +294,6 @@ def _legacy_special_case_algo_1d(
         else:
             break
     return move_set, atom_indices
-
 
 
 def _legacy_middle_fill_algo_1d_clamped(
@@ -362,7 +365,9 @@ def _legacy_middle_fill_algo_1d_clamped(
             atom_index: int
             target_index, atom_index = pair
             if target_index != atom_index:
-                new_atom_index: int = int(atom_index + np.sign(target_index - atom_index))
+                new_atom_index: int = int(
+                    atom_index + np.sign(target_index - atom_index)
+                )
                 move: movr.Move = movr.Move(0, atom_index, 0, new_atom_index)
                 move_list.append(move)
                 pairs[idx] = (target_index, new_atom_index)
@@ -467,7 +472,6 @@ class TestPREBALANCE:
 
         assert after >= before
         assert after >= n_targets
-    
 
     def test_REGRESSION_prebalance_passes_blocked_case(self) -> None:
         init = np.array(
@@ -495,7 +499,6 @@ class TestPREBALANCE:
         )[:, :, None]
 
         moves, ok = bc_new.prebalance(init, targ)
-        
 
         aa: AtomArray = AtomArray(shape=[7, 6], n_species=1)
         aa.matrix = init.copy()
@@ -510,6 +513,7 @@ class TestPREBALANCE:
         assert after >= before
         assert after >= n_targets
         assert np.array_equal(np.multiply(aa.matrix, aa.target), aa.target)
+
 
 class TestBALANCE_ROWS:
     def test_raises_on_insufficient_atoms(self) -> None:
@@ -706,6 +710,7 @@ class TestBALANCE_ROWS:
                 assert top_atoms >= top_req
                 assert bot_atoms >= bot_req
 
+
 class TestBALANCE_PHASE_INTERFACE:
     def test_full_recursive_balance_leaves_every_target_row_feasible(self) -> None:
         rng: np.random.Generator = np.random.default_rng(12)
@@ -755,6 +760,7 @@ class TestBALANCE_PHASE_INTERFACE:
                         f"Row {row} ended balance with {row_atoms} atoms but "
                         f"requires {row_req}."
                     )
+
 
 class TestSPECIAL_CASE_ALGO_1D_EXPECTED_OUTPUT:
     def test_returns_empty_when_no_atoms_and_no_targets(self) -> None:
@@ -815,11 +821,17 @@ class TestMIDDLE_FILL_ALGO_1D_EXPECTED_OUTPUT:
     def test_reduces_to_special_case_when_counts_match(self) -> None:
         init_config, target_config = _make_single_row_case([0, 3, 5], [1, 2, 4], 6)
 
-        move_rounds_mid, atom_set_mid = bc_new.middle_fill_algo_1d(init_config, target_config)
-        move_rounds_sp, atom_set_sp = bc_new.special_case_algo_1d(init_config, target_config)
+        move_rounds_mid, atom_set_mid = bc_new.middle_fill_algo_1d(
+            init_config, target_config
+        )
+        move_rounds_sp, atom_set_sp = bc_new.special_case_algo_1d(
+            init_config, target_config
+        )
 
         assert atom_set_mid == atom_set_sp
-        assert _serialize_move_rounds(move_rounds_mid) == _serialize_move_rounds(move_rounds_sp)
+        assert _serialize_move_rounds(move_rounds_mid) == _serialize_move_rounds(
+            move_rounds_sp
+        )
 
     def test_selects_obvious_centered_block(self) -> None:
         init_config: np.ndarray
@@ -878,11 +890,19 @@ class TestMIDDLE_FILL_ALGO_1D_RANDOM_VALIDITY:
                 n_atoms = int(rng.integers(0, n_cols + 1))
                 n_targets = int(rng.integers(0, n_cols + 1))
 
-                atom_cols = sorted(rng.choice(n_cols, size=n_atoms, replace=False).tolist())
-                target_cols = sorted(rng.choice(n_cols, size=n_targets, replace=False).tolist())
+                atom_cols = sorted(
+                    rng.choice(n_cols, size=n_atoms, replace=False).tolist()
+                )
+                target_cols = sorted(
+                    rng.choice(n_cols, size=n_targets, replace=False).tolist()
+                )
 
-                init_config, target_config = _make_single_row_case(atom_cols, target_cols, n_cols)
-                move_rounds, atom_set = bc_new.middle_fill_algo_1d(init_config, target_config)
+                init_config, target_config = _make_single_row_case(
+                    atom_cols, target_cols, n_cols
+                )
+                move_rounds, atom_set = bc_new.middle_fill_algo_1d(
+                    init_config, target_config
+                )
 
                 if n_targets == 0 or n_atoms < n_targets:
                     assert move_rounds == []
@@ -900,18 +920,23 @@ class TestMIDDLE_FILL_ALGO_1D_RANDOM_VALIDITY:
                     assert len(src_cols) == len(set(src_cols))
                     assert len(dst_cols) == len(set(dst_cols))
                     assert all(abs(dst - src) == 1 for _, src, _, dst in round_moves)
-    
-    def test_middle_fill_algo_1d_does_not_crash_when_center_window_expands_past_left_edge(self) -> None:
+
+    def test_middle_fill_algo_1d_does_not_crash_when_center_window_expands_past_left_edge(
+        self,
+    ) -> None:
         init_config: np.ndarray = np.zeros((1, 12, 1), dtype=np.uint8)
         target_config: np.ndarray = np.zeros((1, 12, 1), dtype=np.uint8)
 
         target_config[0, 5:9, 0] = np.uint8(1)
         init_config[0, [0, 1, 2, 3, 9, 11], 0] = np.uint8(1)
 
-        move_rounds, best_atom_set = bc_new.middle_fill_algo_1d(init_config, target_config)
+        move_rounds, best_atom_set = bc_new.middle_fill_algo_1d(
+            init_config, target_config
+        )
 
         assert isinstance(move_rounds, list)
         assert len(best_atom_set) == int(np.sum(target_config, dtype=np.int64))
+
 
 class TestCHOOSE_BEST_ATOM_SET_1D:
     def test_returns_empty_if_no_targets(self) -> None:
@@ -929,7 +954,9 @@ class TestCHOOSE_BEST_ATOM_SET_1D:
     def test_raises_if_insufficient_atoms(self) -> None:
         init_config, target_config = _make_single_row_case([2], [1, 2, 3], 6)
 
-        with pytest.raises(ValueError, match="at least as many row atoms as target sites"):
+        with pytest.raises(
+            ValueError, match="at least as many row atoms as target sites"
+        ):
             bc_new.choose_best_atom_set_1d(init_config, target_config)
 
     def test_reduces_to_special_case_when_counts_match(self) -> None:
@@ -1123,13 +1150,14 @@ class TestFIRST_ROUND_EDGES_FOR_BEST_SET:
             best_atom_set=best_atom_set,
         )
 
-        move_rounds_old, atom_set_old = bc_new.middle_fill_algo_1d(init_config, target_config)
+        move_rounds_old, atom_set_old = bc_new.middle_fill_algo_1d(
+            init_config, target_config
+        )
 
         assert best_atom_set.tolist() == atom_set_old
         assert edges == {(2, 3), (6, 5)}
         assert edges == {
-            (int(move.from_col), int(move.to_col))
-            for move in move_rounds_old[0]
+            (int(move.from_col), int(move.to_col)) for move in move_rounds_old[0]
         }
 
     def test_matches_old_middle_fill_first_round_on_left_case(self) -> None:
@@ -1149,13 +1177,14 @@ class TestFIRST_ROUND_EDGES_FOR_BEST_SET:
             best_atom_set=best_atom_set,
         )
 
-        move_rounds_old, atom_set_old = bc_new.middle_fill_algo_1d(init_config, target_config)
+        move_rounds_old, atom_set_old = bc_new.middle_fill_algo_1d(
+            init_config, target_config
+        )
 
         assert best_atom_set.tolist() == atom_set_old
         assert edges == {(4, 3)}
         assert edges == {
-            (int(move.from_col), int(move.to_col))
-            for move in move_rounds_old[0]
+            (int(move.from_col), int(move.to_col)) for move in move_rounds_old[0]
         }
 
     def test_matches_old_middle_fill_first_round_on_right_case(self) -> None:
@@ -1175,13 +1204,14 @@ class TestFIRST_ROUND_EDGES_FOR_BEST_SET:
             best_atom_set=best_atom_set,
         )
 
-        move_rounds_old, atom_set_old = bc_new.middle_fill_algo_1d(init_config, target_config)
+        move_rounds_old, atom_set_old = bc_new.middle_fill_algo_1d(
+            init_config, target_config
+        )
 
         assert best_atom_set.tolist() == atom_set_old
         assert edges == {(5, 6)}
         assert edges == {
-            (int(move.from_col), int(move.to_col))
-            for move in move_rounds_old[0]
+            (int(move.from_col), int(move.to_col)) for move in move_rounds_old[0]
         }
 
     def test_matches_old_special_case_first_round_when_counts_match(self) -> None:
@@ -1197,12 +1227,13 @@ class TestFIRST_ROUND_EDGES_FOR_BEST_SET:
             best_atom_set=best_atom_set,
         )
 
-        move_rounds_old, atom_set_old = bc_new.special_case_algo_1d(init_config, target_config)
+        move_rounds_old, atom_set_old = bc_new.special_case_algo_1d(
+            init_config, target_config
+        )
 
         assert best_atom_set.tolist() == atom_set_old
         assert edges == {
-            (int(move.from_col), int(move.to_col))
-            for move in move_rounds_old[0]
+            (int(move.from_col), int(move.to_col)) for move in move_rounds_old[0]
         }
 
     def test_raises_if_best_atom_count_does_not_match_target_count(self) -> None:
@@ -1273,7 +1304,9 @@ class TestFIRST_ROUND_EDGES_FOR_BEST_SET:
                 assert all(abs(int(dst) - int(src)) == 1 for src, dst in edges)
                 assert all(int(src) in best_atom_set.tolist() for src in src_cols)
 
-                target_indices: np.ndarray = np.flatnonzero(target_config[0, :, 0]).astype(
+                target_indices: np.ndarray = np.flatnonzero(
+                    target_config[0, :, 0]
+                ).astype(
                     np.intp,
                     copy=False,
                 )
@@ -1292,7 +1325,9 @@ class TestFIRST_ROUND_EDGES_FOR_BEST_SET:
 
 class TestCHOOSE_BEST_ATOM_SET_1D_COMPATIBILITY:
     @pytest.mark.parametrize("n_cols", [5, 8, 12, 24])
-    def test_matches_old_middle_fill_atom_set_on_small_random_cases(self, n_cols: int) -> None:
+    def test_matches_old_middle_fill_atom_set_on_small_random_cases(
+        self, n_cols: int
+    ) -> None:
         rng: np.random.Generator = np.random.default_rng(20260416 + n_cols)
 
         for _ in range(400):
@@ -1352,7 +1387,9 @@ class TestCHOOSE_BEST_ATOM_SET_1D_COMPATIBILITY:
 
 class TestFIRST_ROUND_EDGES_FOR_BEST_SET_COMPATIBILITY:
     @pytest.mark.parametrize("n_cols", [5, 8, 12, 24])
-    def test_matches_old_middle_fill_first_round_on_small_random_cases(self, n_cols: int) -> None:
+    def test_matches_old_middle_fill_first_round_on_small_random_cases(
+        self, n_cols: int
+    ) -> None:
         rng: np.random.Generator = np.random.default_rng(20260429 + n_cols)
 
         for _ in range(400):
@@ -1403,6 +1440,7 @@ class TestFIRST_ROUND_EDGES_FOR_BEST_SET_COMPATIBILITY:
                 }
                 assert edges_new == edges_old
 
+
 class TestCOMPACT:
     def test_returns_empty_for_empty_target(self) -> None:
         aa: AtomArray = AtomArray(shape=[4, 5], n_species=1)
@@ -1424,7 +1462,9 @@ class TestCOMPACT:
 
         assert bc_new.compact(aa) == []
 
-    def test_returns_empty_when_target_region_is_prepared_but_surplus_exists_elsewhere(self) -> None:
+    def test_returns_empty_when_target_region_is_prepared_but_surplus_exists_elsewhere(
+        self,
+    ) -> None:
         aa: AtomArray = AtomArray(shape=[3, 7], n_species=1)
         aa.matrix[:, :, 0] = np.uint8(0)
         aa.target[:, :, 0] = np.uint8(0)
@@ -1455,7 +1495,7 @@ class TestCOMPACT:
         aa.matrix[0, 4, 0] = np.uint8(1)
         aa.matrix[1, 0, 0] = np.uint8(1)
 
-        with pytest.raises(ValueError, match='compact\(\) requires each target row'):
+        with pytest.raises(ValueError, match="compact\(\) requires each target row"):
             bc_new.compact(aa)
 
     def test_compact_terminates_and_conserves_atoms(self) -> None:
@@ -1498,12 +1538,20 @@ class TestCOMPACT:
         move_rounds: list[list[movr.Move]] = bc_new.compact(aa)
 
         for k, round_moves in enumerate(move_rounds):
-            srcs: list[tuple[int, int]] = [(m.from_row, m.from_col) for m in round_moves]
+            srcs: list[tuple[int, int]] = [
+                (m.from_row, m.from_col) for m in round_moves
+            ]
             dests: list[tuple[int, int]] = [(m.to_row, m.to_col) for m in round_moves]
-            assert len(srcs) == len(set(srcs)), f"Round {k} has duplicate sources: {srcs}"
-            assert len(dests) == len(set(dests)), f"Round {k} has duplicate destinations: {dests}"
+            assert len(srcs) == len(
+                set(srcs)
+            ), f"Round {k} has duplicate sources: {srcs}"
+            assert len(dests) == len(
+                set(dests)
+            ), f"Round {k} has duplicate destinations: {dests}"
 
-    def test_compact_prepares_target_when_row_counts_are_already_sufficient(self) -> None:
+    def test_compact_prepares_target_when_row_counts_are_already_sufficient(
+        self,
+    ) -> None:
         aa: AtomArray = AtomArray(shape=[4, 7], n_species=1)
         aa.matrix[:, :, 0] = np.uint8(0)
         aa.target[:, :, 0] = np.uint8(0)
@@ -1561,50 +1609,60 @@ class TestCOMPACT:
         _replay_and_check_noiseless_conservation(aa2, move_rounds)
 
         assert np.array_equal(aa2.matrix * aa2.target, aa2.target)
-    
+
     def test_REGRESSION_compact_doesnt_go_into_infinite_loop(self) -> None:
-        mat = np.array([[0, 0, 0, 0, 0],
-                        [0, 0, 0, 0, 0],
-                        [0, 0, 0, 0, 0],
-                        [0, 0, 0, 0, 0],
-                        [0, 0, 0, 0, 0],
-                        [0, 0, 0, 0, 0],
-                        [0, 0, 0, 0, 0],
-                        [0, 0, 0, 0, 0],
-                        [0, 0, 0, 0, 0],
-                        [0, 0, 0, 0, 0],
-                        [1, 0, 0, 0, 0],
-                        [0, 0, 0, 1, 0],
-                        [0, 0, 0, 1, 0],
-                        [0, 1, 0, 0, 0],
-                        [0, 0, 1, 0, 0],
-                        [0, 0, 0, 1, 0],
-                        [0, 0, 1, 0, 0],
-                        [1, 0, 0, 0, 0],
-                        [0, 0, 1, 0, 0],
-                        [1, 0, 0, 0, 0]], dtype = np.uint8)
-    
-        target_2d = np.array([[0, 0, 0, 0, 0],
-                              [0, 0, 0, 0, 0],
-                              [0, 0, 0, 0, 0],
-                              [0, 0, 0, 0, 0],
-                              [0, 0, 0, 0, 0],
-                              [0, 0, 0, 0, 0],
-                              [0, 0, 0, 0, 0],
-                              [0, 0, 0, 0, 0],
-                              [0, 0, 0, 0, 0],
-                              [0, 0, 0, 0, 0],
-                              [0, 0, 0, 0, 1],
-                              [0, 0, 0, 0, 1],
-                              [0, 0, 0, 0, 1],
-                              [0, 0, 0, 0, 1],
-                              [0, 0, 0, 0, 1],
-                              [0, 0, 0, 0, 1],
-                              [0, 0, 0, 0, 1],
-                              [0, 0, 0, 0, 1],
-                              [0, 0, 0, 0, 1],
-                              [0, 0, 0, 0, 1]], dtype=np.uint8)
-        
+        mat = np.array(
+            [
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [1, 0, 0, 0, 0],
+                [0, 0, 0, 1, 0],
+                [0, 0, 0, 1, 0],
+                [0, 1, 0, 0, 0],
+                [0, 0, 1, 0, 0],
+                [0, 0, 0, 1, 0],
+                [0, 0, 1, 0, 0],
+                [1, 0, 0, 0, 0],
+                [0, 0, 1, 0, 0],
+                [1, 0, 0, 0, 0],
+            ],
+            dtype=np.uint8,
+        )
+
+        target_2d = np.array(
+            [
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 1],
+                [0, 0, 0, 0, 1],
+                [0, 0, 0, 0, 1],
+                [0, 0, 0, 0, 1],
+                [0, 0, 0, 0, 1],
+                [0, 0, 0, 0, 1],
+                [0, 0, 0, 0, 1],
+                [0, 0, 0, 0, 1],
+                [0, 0, 0, 0, 1],
+                [0, 0, 0, 0, 1],
+            ],
+            dtype=np.uint8,
+        )
+
         aa: AtomArray = _make_atom_array(mat, target_2d)
         move_rounds: list[list[movr.Move]] = bc_new.compact(aa)
 
@@ -1612,94 +1670,115 @@ class TestCOMPACT:
         _replay_and_check_noiseless_conservation(aa2, move_rounds)
 
         assert np.array_equal(aa2.matrix * aa2.target, aa2.target)
-    
+
     def test_REGRESSION_compact_does_not_revisit_states(self) -> None:
-        tar = np.array([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                        [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-                        [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-                        [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-                        [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-                        [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-                        [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-                        [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-                        [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-                        [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-                        [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-                        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]], dtype = np.uint8)
-        
-        mat = np.array([[0, 0, 0, 1, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0],
-                        [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                        [1, 1, 1, 1, 1, 0, 0, 0, 1, 0, 1, 1, 1, 1],
-                        [1, 1, 1, 1, 0, 0, 1, 0, 0, 1, 1, 1, 1, 1],
-                        [0, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-                        [1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1],
-                        [1, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1],
-                        [0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0],
-                        [0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0],
-                        [1, 0, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1],
-                        [0, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1],
-                        [1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 0, 1],
-                        [0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 1],
-                        [0, 0, 0, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0]], dtype = np.uint8)
-        
+        tar = np.array(
+            [
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            ],
+            dtype=np.uint8,
+        )
+
+        mat = np.array(
+            [
+                [0, 0, 0, 1, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0],
+                [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [1, 1, 1, 1, 1, 0, 0, 0, 1, 0, 1, 1, 1, 1],
+                [1, 1, 1, 1, 0, 0, 1, 0, 0, 1, 1, 1, 1, 1],
+                [0, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1],
+                [1, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1],
+                [0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0],
+                [0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0],
+                [1, 0, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1],
+                [0, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1],
+                [1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 0, 1],
+                [0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 1],
+                [0, 0, 0, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0],
+            ],
+            dtype=np.uint8,
+        )
+
         aa: AtomArray = _make_atom_array(mat, tar)
         print(bc_new.__file__)
         print(bc_new.compact.__code__.co_firstlineno)
         print("matrix shape/dtype:", aa.matrix.shape, aa.matrix.dtype)
         print("target shape/dtype:", aa.target.shape, aa.target.dtype)
+
         def stable_digest(arr) -> str:
             return hashlib.sha256(arr.tobytes()).hexdigest()
+
         print("matrix bytes hash:", hash(aa.matrix.tobytes()))
         print("target bytes hash:", hash(aa.target.tobytes()))
         move_rounds: list[list[movr.Move]] = bc_new.compact(aa)
-        
 
         aa2: AtomArray = _make_atom_array(mat, tar)
         _replay_and_check_noiseless_conservation(aa2, move_rounds)
 
         assert np.array_equal(aa2.matrix * aa2.target, aa2.target)
-    
+
     def test_REGRESSION_compact_does_not_revisit_states_case2(self) -> None:
-        tar = np.array([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                        [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-                        [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-                        [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-                        [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-                        [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-                        [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-                        [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-                        [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-                        [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-                        [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-                        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]], dtype = np.uint8)
-        
-        mat = np.array([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                        [0, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1],
-                        [1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1],
-                        [1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-                        [1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 0, 1, 1],
-                        [1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 1],
-                        [1, 1, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 1, 1],
-                        [1, 1, 1, 0, 1, 1, 0, 1, 1, 1, 0, 1, 0, 1],
-                        [1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 0, 1],
-                        [1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 0, 1, 1, 0],
-                        [1, 1, 1, 1, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1],
-                        [0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 1],
-                        [1, 0, 1, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0]], dtype = np.uint8)
-        
+        tar = np.array(
+            [
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            ],
+            dtype=np.uint8,
+        )
+
+        mat = np.array(
+            [
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1],
+                [1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1],
+                [1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 0, 1, 1],
+                [1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 1],
+                [1, 1, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 1, 1],
+                [1, 1, 1, 0, 1, 1, 0, 1, 1, 1, 0, 1, 0, 1],
+                [1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 0, 1],
+                [1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 0, 1, 1, 0],
+                [1, 1, 1, 1, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1],
+                [0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 1],
+                [1, 0, 1, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0],
+            ],
+            dtype=np.uint8,
+        )
+
         aa: AtomArray = _make_atom_array(mat, tar)
 
         def stable_digest(arr) -> str:
             return hashlib.sha256(arr.tobytes()).hexdigest()
 
         print("=== BCv2 compact debug ===")
-        print("compact file:",bc_new. __file__)
-        print("first line no:",bc_new.compact.__code__.co_firstlineno)
+        print("compact file:", bc_new.__file__)
+        print("first line no:", bc_new.compact.__code__.co_firstlineno)
         print("matrix shape/dtype:", aa.matrix.shape, aa.matrix.dtype)
         print("target shape/dtype:", aa.target.shape, aa.target.dtype)
         print("matrix stable digest:", stable_digest(aa.matrix))
@@ -1707,82 +1786,96 @@ class TestCOMPACT:
         print("matrix:", aa.matrix[:, :, 0].astype(int))
         print("target:", aa.target[:, :, 0].astype(int))
         move_rounds: list[list[movr.Move]] = bc_new.compact(aa)
-        
 
         aa2: AtomArray = _make_atom_array(mat, tar)
         _replay_and_check_noiseless_conservation(aa2, move_rounds)
 
         assert np.array_equal(aa2.matrix * aa2.target, aa2.target)
-    
-    @pytest.mark.parametrize('stuck_state', [
-        [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-         [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-         [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-         [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-         [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-         [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-         [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-         [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-         [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-         [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-         [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0],
-         [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-         [0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1],
-         [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1]],
-        [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-         [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-         [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-         [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-         [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-         [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-         [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-         [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-         [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-         [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-         [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-         [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0],
-         [1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 1],
-         [1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1]],
-        [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-         [0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0],
-         [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-         [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-         [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-         [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0],
-         [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-         [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-         [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-         [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-         [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-         [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-         [0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 0, 1, 1, 0],
-         [0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1]]])
+
+    @pytest.mark.parametrize(
+        "stuck_state",
+        [
+            [
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1],
+                [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1],
+            ],
+            [
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0],
+                [1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 1],
+                [1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1],
+            ],
+            [
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 0, 1, 1, 0],
+                [0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1],
+            ],
+        ],
+    )
     def test_REGRESSION_compact_succeeds_on_repeated_config(self, stuck_state) -> None:
-        mat = np.array(stuck_state, dtype = np.uint8)
+        mat = np.array(stuck_state, dtype=np.uint8)
 
-        tar = np.array([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                        [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-                        [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-                        [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-                        [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-                        [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-                        [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-                        [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-                        [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-                        [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-                        [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-                        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]], dtype = np.uint8)
-        
+        tar = np.array(
+            [
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            ],
+            dtype=np.uint8,
+        )
+
         aa: AtomArray = _make_atom_array(mat, tar)
 
         def stable_digest(arr) -> str:
             return hashlib.sha256(arr.tobytes()).hexdigest()
 
         print("=== BCv2 compact debug ===")
-        print("compact file:",bc_new. __file__)
-        print("first line no:",bc_new.compact.__code__.co_firstlineno)
+        print("compact file:", bc_new.__file__)
+        print("first line no:", bc_new.compact.__code__.co_firstlineno)
         print("matrix shape/dtype:", aa.matrix.shape, aa.matrix.dtype)
         print("target shape/dtype:", aa.target.shape, aa.target.dtype)
         print("matrix stable digest:", stable_digest(aa.matrix))
@@ -1790,12 +1883,12 @@ class TestCOMPACT:
         print("matrix:", aa.matrix[:, :, 0].astype(int))
         print("target:", aa.target[:, :, 0].astype(int))
         move_rounds: list[list[movr.Move]] = bc_new.compact(aa)
-        
 
         aa2: AtomArray = _make_atom_array(mat, tar)
         _replay_and_check_noiseless_conservation(aa2, move_rounds)
 
         assert np.array_equal(aa2.matrix * aa2.target, aa2.target)
+
 
 class TestBCV2:
     def test_returns_failure_when_compact_raises(
@@ -1829,8 +1922,10 @@ class TestBCV2:
         assert success_flag is False
         assert isinstance(master_moves, list)
         assert isinstance(final_matrix, np.ndarray)
-    
-    def test_bcv2_replay_matches_returned_final_matrix_and_fills_target_mask(self) -> None:
+
+    def test_bcv2_replay_matches_returned_final_matrix_and_fills_target_mask(
+        self,
+    ) -> None:
         matrix_2d: np.ndarray = np.zeros((6, 6), dtype=np.uint8)
         target_2d: np.ndarray = np.zeros((6, 6), dtype=np.uint8)
 
@@ -1860,7 +1955,9 @@ class TestBCV2:
         assert _n_atoms(final_matrix) == n0
         assert np.array_equal(final_matrix * replay_arr.target, replay_arr.target)
 
-    def test_bcv2_reports_success_and_returns_no_moves_when_already_prepared(self) -> None:
+    def test_bcv2_reports_success_and_returns_no_moves_when_already_prepared(
+        self,
+    ) -> None:
         matrix_2d: np.ndarray = np.array(
             [
                 [0, 1, 1, 0],
@@ -1881,50 +1978,59 @@ class TestBCV2:
         assert master_moves == []
         assert np.array_equal(final_matrix[:, :, 0], target_2d)
 
-    
     def test_bcv2_REGRESSION_20x4_array_fails_on_compact(self):
-        matrix_2d = np.array([[0, 0, 0, 0, 0],
-                              [0, 1, 0, 0, 0],
-                              [0, 0, 0, 0, 0],
-                              [0, 0, 0, 0, 0],
-                              [0, 0, 0, 0, 0],
-                              [0, 0, 0, 0, 1],
-                              [1, 1, 1, 0, 0],
-                              [0, 0, 0, 0, 0],
-                              [0, 0, 0, 0, 0],
-                              [0, 0, 0, 0, 0],
-                              [0, 0, 0, 0, 0],
-                              [0, 0, 0, 0, 0],
-                              [0, 0, 0, 0, 0],
-                              [0, 0, 0, 0, 0],
-                              [0, 0, 0, 1, 1],
-                              [0, 0, 0, 0, 0],
-                              [0, 0, 0, 0, 0],
-                              [1, 0, 0, 1, 0],
-                              [0, 0, 0, 0, 0],
-                              [1, 0, 0, 0, 0]], dtype=np.uint8)
+        matrix_2d = np.array(
+            [
+                [0, 0, 0, 0, 0],
+                [0, 1, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 1],
+                [1, 1, 1, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 1, 1],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [1, 0, 0, 1, 0],
+                [0, 0, 0, 0, 0],
+                [1, 0, 0, 0, 0],
+            ],
+            dtype=np.uint8,
+        )
 
-        target_2d = np.array([[0, 0, 0, 0, 0],
-                              [0, 0, 0, 0, 0],
-                              [0, 0, 0, 0, 0],
-                              [0, 0, 0, 0, 0],
-                              [0, 0, 0, 0, 0],
-                              [0, 0, 0, 0, 0],
-                              [0, 0, 0, 0, 0],
-                              [0, 0, 0, 0, 0],
-                              [0, 0, 0, 0, 0],
-                              [0, 0, 0, 0, 0],
-                              [0, 0, 0, 0, 1],
-                              [0, 0, 0, 0, 1],
-                              [0, 0, 0, 0, 1],
-                              [0, 0, 0, 0, 1],
-                              [0, 0, 0, 0, 1],
-                              [0, 0, 0, 0, 1],
-                              [0, 0, 0, 0, 1],
-                              [0, 0, 0, 0, 1],
-                              [0, 0, 0, 0, 1],
-                              [0, 0, 0, 0, 1]], dtype=np.uint8)
-        
+        target_2d = np.array(
+            [
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 1],
+                [0, 0, 0, 0, 1],
+                [0, 0, 0, 0, 1],
+                [0, 0, 0, 0, 1],
+                [0, 0, 0, 0, 1],
+                [0, 0, 0, 0, 1],
+                [0, 0, 0, 0, 1],
+                [0, 0, 0, 0, 1],
+                [0, 0, 0, 0, 1],
+                [0, 0, 0, 0, 1],
+            ],
+            dtype=np.uint8,
+        )
+
         arr: AtomArray = _make_atom_array(matrix_2d, target_2d)
         n_before: int = _n_atoms(arr.matrix)
         n_rows = 20
@@ -1985,6 +2091,7 @@ class TestBCV2_RANDOM_END_TO_END:
 
     This test is a falsification search, not a proof of universal correctness.
     """
+
     @pytest.mark.slow
     @pytest.mark.parametrize(
         ("n_rows", "n_cols", "n_trials"),
@@ -2009,7 +2116,9 @@ class TestBCV2_RANDOM_END_TO_END:
         For random globally feasible cases, BCv2 should replay to the returned final
         matrix, conserve atom number, and fill the target support mask.
         """
-        rng: np.random.Generator = np.random.default_rng(20260401 + 17 * n_rows + n_cols)
+        rng: np.random.Generator = np.random.default_rng(
+            20260401 + 17 * n_rows + n_cols
+        )
 
         for trial_index in range(n_trials):
             matrix_2d: np.ndarray
@@ -2027,16 +2136,18 @@ class TestBCV2_RANDOM_END_TO_END:
             master_moves: list[list[movr.Move]]
             success_flag: bool
             try:
-                final_matrix, master_moves, success_flag = bc_new.bcv2(arr, do_ejection=False)
+                final_matrix, master_moves, success_flag = bc_new.bcv2(
+                    arr, do_ejection=False
+                )
             except UnboundLocalError:
-                print(f'index is {trial_index}')
+                print(f"index is {trial_index}")
                 raise
 
             replay_arr: AtomArray = _make_atom_array(matrix_2d, target_2d)
             try:
                 _replay_and_check_noiseless_conservation(replay_arr, master_moves)
             except AssertionError:
-                print(f'index is {trial_index}')
+                print(f"index is {trial_index}")
 
             assert np.array_equal(
                 replay_arr.matrix,
@@ -2089,11 +2200,17 @@ class TestSPECIAL_CASE_ALGO_1D_PERFORMANCE:
         n_cols: int = 256
         n_atoms: int = 96
 
-        atom_cols: list[int] = sorted(rng.choice(n_cols, size=n_atoms, replace=False).tolist())
-        target_cols: list[int] = sorted(rng.choice(n_cols, size=n_atoms, replace=False).tolist())
+        atom_cols: list[int] = sorted(
+            rng.choice(n_cols, size=n_atoms, replace=False).tolist()
+        )
+        target_cols: list[int] = sorted(
+            rng.choice(n_cols, size=n_atoms, replace=False).tolist()
+        )
         init_config: np.ndarray
         target_config: np.ndarray
-        init_config, target_config = _make_single_row_case(atom_cols, target_cols, n_cols)
+        init_config, target_config = _make_single_row_case(
+            atom_cols, target_cols, n_cols
+        )
 
         t_new: float = _time_function(
             bc_new.special_case_algo_1d,
@@ -2113,11 +2230,17 @@ class TestMIDDLE_FILL_ALGO_1D_PERFORMANCE:
         n_atoms: int = 128
         n_targets: int = 80
 
-        atom_cols: list[int] = sorted(rng.choice(n_cols, size=n_atoms, replace=False).tolist())
-        target_cols: list[int] = sorted(rng.choice(n_cols, size=n_targets, replace=False).tolist())
+        atom_cols: list[int] = sorted(
+            rng.choice(n_cols, size=n_atoms, replace=False).tolist()
+        )
+        target_cols: list[int] = sorted(
+            rng.choice(n_cols, size=n_targets, replace=False).tolist()
+        )
         init_config: np.ndarray
         target_config: np.ndarray
-        init_config, target_config = _make_single_row_case(atom_cols, target_cols, n_cols)
+        init_config, target_config = _make_single_row_case(
+            atom_cols, target_cols, n_cols
+        )
 
         t_new: float = _time_function(
             bc_new.middle_fill_algo_1d,
@@ -2200,7 +2323,9 @@ class TestCOMPACT_PERFORMANCE:
         ]
 
         def _run_new(case: AtomArray) -> list[list[movr.Move]]:
-            arr: AtomArray = _make_atom_array(case.matrix[:, :, 0], case.target[:, :, 0])
+            arr: AtomArray = _make_atom_array(
+                case.matrix[:, :, 0], case.target[:, :, 0]
+            )
             return bc_new.compact(arr)
 
         total_new: float = 0.0
@@ -2241,7 +2366,9 @@ class TestBCV2_PERFORMANCE:
 
 
 class TestPREBALANCE_ADDITIONAL_CONTRACTS:
-    def test_returns_success_with_no_moves_when_target_band_already_sufficient(self) -> None:
+    def test_returns_success_with_no_moves_when_target_band_already_sufficient(
+        self,
+    ) -> None:
         """A sufficiently populated target-row band should short-circuit immediately."""
         init: np.ndarray = np.zeros((5, 6, 1), dtype=np.uint8)
         targ: np.ndarray = np.zeros((5, 6, 1), dtype=np.uint8)
@@ -2443,7 +2570,9 @@ class TestBALANCE_ROWS_ADDITIONAL_CONTRACTS:
                 assert 1 <= int(move.from_row) <= 4
                 assert 1 <= int(move.to_row) <= 4
 
-    def test_raises_runtimeerror_when_transfer_decomposition_stalls(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_raises_runtimeerror_when_transfer_decomposition_stalls(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """
         Globally sufficient atom count but decomposition-limited routing should raise RuntimeError.
         """
@@ -2480,7 +2609,9 @@ class TestBALANCE_ROWS_ADDITIONAL_CONTRACTS:
 
         monkeypatch.setattr(bc_new, "move_across_rows", _stall)
 
-        with pytest.raises(RuntimeError, match="move_across_rows failed to complete transfer"):
+        with pytest.raises(
+            RuntimeError, match="move_across_rows failed to complete transfer"
+        ):
             bc_new.balance_rows(init, targ, 0, 3)
 
 

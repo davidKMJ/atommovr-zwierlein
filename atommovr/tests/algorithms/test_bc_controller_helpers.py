@@ -198,7 +198,9 @@ def _test_pure_mode_matches(
 
 def _test_vacancy_center_twice(destination_row: np.ndarray) -> int:
     """Return twice the arithmetic mean of destination vacancy columns."""
-    vacancy_cols: np.ndarray = np.flatnonzero(destination_row == 0).astype(np.intp, copy=False)
+    vacancy_cols: np.ndarray = np.flatnonzero(destination_row == 0).astype(
+        np.intp, copy=False
+    )
     if vacancy_cols.size == 0:
         raise ValueError("destination_row must contain at least one vacancy.")
     return int(2 * np.sum(vacancy_cols, dtype=np.int64) // int(vacancy_cols.size))
@@ -266,8 +268,18 @@ def _test_best_pure_bounded_plan(
         assert n_chosen == n_needed
 
         score: tuple[int, int, int] = (
-            int(np.sum(np.abs(2 * chosen_to.astype(np.int64) - center_twice), dtype=np.int64)),
-            int(np.sum(np.abs(chosen_to.astype(np.int64) - chosen_from.astype(np.int64)), dtype=np.int64)),
+            int(
+                np.sum(
+                    np.abs(2 * chosen_to.astype(np.int64) - center_twice),
+                    dtype=np.int64,
+                )
+            ),
+            int(
+                np.sum(
+                    np.abs(chosen_to.astype(np.int64) - chosen_from.astype(np.int64)),
+                    dtype=np.int64,
+                )
+            ),
             mode_rank,
         )
         candidates.append((score, chosen_from, chosen_to))
@@ -280,6 +292,7 @@ def _test_best_pure_bounded_plan(
     best_from: np.ndarray = candidates[0][1]
     best_to: np.ndarray = candidates[0][2]
     return best_from, best_to, int(best_from.size)
+
 
 class TestCOMPRESS_MOVE_ROUNDS_CONSERVATIVE:
     def test_returns_empty_for_empty_schedule(self) -> None:
@@ -322,7 +335,9 @@ class TestCOMPRESS_MOVE_ROUNDS_CONSERVATIVE:
         assert len(compressed) == 1
         assert len(compressed[0]) == 3
 
-        original_final: np.ndarray = _replay_rounds(state=state, move_rounds=move_rounds)
+        original_final: np.ndarray = _replay_rounds(
+            state=state, move_rounds=move_rounds
+        )
         compressed_final: np.ndarray = _replay_rounds(
             state=state,
             move_rounds=compressed,
@@ -353,7 +368,9 @@ class TestCOMPRESS_MOVE_ROUNDS_CONSERVATIVE:
 
         assert compressed == move_rounds
 
-        original_final: np.ndarray = _replay_rounds(state=state, move_rounds=move_rounds)
+        original_final: np.ndarray = _replay_rounds(
+            state=state, move_rounds=move_rounds
+        )
         compressed_final: np.ndarray = _replay_rounds(
             state=state,
             move_rounds=compressed,
@@ -387,7 +404,9 @@ class TestCOMPRESS_MOVE_ROUNDS_CONSERVATIVE:
         assert len(compressed[0]) == 3
         assert compressed[1] == move_rounds[3]
 
-        original_final: np.ndarray = _replay_rounds(state=state, move_rounds=move_rounds)
+        original_final: np.ndarray = _replay_rounds(
+            state=state, move_rounds=move_rounds
+        )
         compressed_final: np.ndarray = _replay_rounds(
             state=state,
             move_rounds=compressed,
@@ -420,7 +439,9 @@ class TestCOMPRESS_MOVE_ROUNDS_CONSERVATIVE:
         assert len(compressed[1]) == 2
         assert compressed[1] == move_rounds[3]
 
-        original_final: np.ndarray = _replay_rounds(state=state, move_rounds=move_rounds)
+        original_final: np.ndarray = _replay_rounds(
+            state=state, move_rounds=move_rounds
+        )
         compressed_final: np.ndarray = _replay_rounds(
             state=state,
             move_rounds=compressed,
@@ -457,18 +478,21 @@ class TestSOURCE_SUPPLY_AT_BOUNDARY:
         with pytest.raises(ValueError):
             source_supply_at_boundary(state_2d, 0)
 
-    @pytest.mark.parametrize("moves", [
-        [[Move(2, 2, 2, 1)], [Move(2, 3, 2, 2)]],
-        [[Move(2, 2, 2, 1)], [Move(0, 2, 0, 1)]],
-        [[Move(2, 2, 2, 1)], [Move(0, 2, 0, 1)],[Move(2, 3, 2, 2)]],
-        [[Move(2, 2, 2, 1)], [Move(0, 2, 0, 1), Move(2, 3, 2, 2)]],
-        [[Move(2, 2, 2, 1), Move(2, 3, 2, 2)], [Move(0, 2, 0, 1)]],
-        [[Move(1, 1, 0, 1)], [Move(2, 4, 1, 4)]],
-        [[Move(1, 1, 0, 1)], [Move(1, 3, 0, 3)], [Move(2, 3, 1, 3)]],
-        [[Move(1, 1, 0, 1)], [Move(2, 3, 1, 3), Move(1, 3, 0, 3)]],
-        [[Move(1, 1, 0, 1)], [Move(1, 3, 0, 3), Move(2, 3, 1, 3)]],
-        [[Move(2, 3, 1, 3), Move(1, 3, 0, 3)], [Move(1, 1, 0, 1)]],
-                                       ])
+    @pytest.mark.parametrize(
+        "moves",
+        [
+            [[Move(2, 2, 2, 1)], [Move(2, 3, 2, 2)]],
+            [[Move(2, 2, 2, 1)], [Move(0, 2, 0, 1)]],
+            [[Move(2, 2, 2, 1)], [Move(0, 2, 0, 1)], [Move(2, 3, 2, 2)]],
+            [[Move(2, 2, 2, 1)], [Move(0, 2, 0, 1), Move(2, 3, 2, 2)]],
+            [[Move(2, 2, 2, 1), Move(2, 3, 2, 2)], [Move(0, 2, 0, 1)]],
+            [[Move(1, 1, 0, 1)], [Move(2, 4, 1, 4)]],
+            [[Move(1, 1, 0, 1)], [Move(1, 3, 0, 3)], [Move(2, 3, 1, 3)]],
+            [[Move(1, 1, 0, 1)], [Move(2, 3, 1, 3), Move(1, 3, 0, 3)]],
+            [[Move(1, 1, 0, 1)], [Move(1, 3, 0, 3), Move(2, 3, 1, 3)]],
+            [[Move(2, 3, 1, 3), Move(1, 3, 0, 3)], [Move(1, 1, 0, 1)]],
+        ],
+    )
     def test_mergeable_moves_are_merged_into_single_round(self, moves):
         state: np.ndarray = _make_state_from_rows(
             [1, 0, 1, 0, 0],
@@ -477,13 +501,16 @@ class TestSOURCE_SUPPLY_AT_BOUNDARY:
         )
         com_moves = compress_move_rounds_conservative(state, moves)
         assert len(com_moves) == 1
-    
-    @pytest.mark.parametrize("moves", [
-        [[Move(1, 1, 0, 1)], [Move(2, 3, 1, 3)]],
-        [[Move(0, 2, 0, 1)], [Move(2, 4, 1, 4)]],
-        [[Move(1, 1, 0, 1)], [Move(2, 3, 1, 3)], [Move(1, 3, 0, 3)]],
-        [[Move(2, 2, 2, 1)], [Move(1, 3, 1, 4)]],
-                                       ])
+
+    @pytest.mark.parametrize(
+        "moves",
+        [
+            [[Move(1, 1, 0, 1)], [Move(2, 3, 1, 3)]],
+            [[Move(0, 2, 0, 1)], [Move(2, 4, 1, 4)]],
+            [[Move(1, 1, 0, 1)], [Move(2, 3, 1, 3)], [Move(1, 3, 0, 3)]],
+            [[Move(2, 2, 2, 1)], [Move(1, 3, 1, 4)]],
+        ],
+    )
     def test_nonmergeable_moves_are_not_merged(self, moves):
         state: np.ndarray = _make_state_from_rows(
             [1, 0, 1, 0, 0],
@@ -546,8 +573,12 @@ class TestDIRECT_CUT_CAPACITY:
         for n_cols in range(1, 7):
             for _ in range(200):
                 source_row: np.ndarray = rng.integers(0, 2, size=n_cols, dtype=np.uint8)
-                destination_row: np.ndarray = rng.integers(0, 2, size=n_cols, dtype=np.uint8)
-                state: np.ndarray = _make_state([source_row.tolist(), destination_row.tolist()])
+                destination_row: np.ndarray = rng.integers(
+                    0, 2, size=n_cols, dtype=np.uint8
+                )
+                state: np.ndarray = _make_state(
+                    [source_row.tolist(), destination_row.tolist()]
+                )
 
                 observed: int = direct_cut_capacity(state, 0, 1)
                 expected: int = _bruteforce_direct_cut_capacity(
@@ -563,17 +594,23 @@ class TestGET_ALL_MOVES_BTWN_ROWS_COLS:
         with pytest.raises(IndexError):
             get_all_moves_btwn_rows_cols(state, -1, 1, n_transfer_needed=0)
 
-    def test_get_all_moves_btwn_rows_cols_raises_for_negative_destination_row(self) -> None:
+    def test_get_all_moves_btwn_rows_cols_raises_for_negative_destination_row(
+        self,
+    ) -> None:
         state: np.ndarray = _make_state([[1, 0], [0, 0]])
         with pytest.raises(IndexError):
             get_all_moves_btwn_rows_cols(state, 0, -1, n_transfer_needed=0)
 
-    def test_get_all_moves_btwn_rows_cols_raises_for_source_row_out_of_bounds(self) -> None:
+    def test_get_all_moves_btwn_rows_cols_raises_for_source_row_out_of_bounds(
+        self,
+    ) -> None:
         state: np.ndarray = _make_state([[1, 0], [0, 0]])
         with pytest.raises(IndexError):
             get_all_moves_btwn_rows_cols(state, 2, 1, n_transfer_needed=0)
 
-    def test_get_all_moves_btwn_rows_cols_raises_for_destination_row_out_of_bounds(self) -> None:
+    def test_get_all_moves_btwn_rows_cols_raises_for_destination_row_out_of_bounds(
+        self,
+    ) -> None:
         state: np.ndarray = _make_state([[1, 0], [0, 0]])
         with pytest.raises(IndexError):
             get_all_moves_btwn_rows_cols(state, 0, 2, n_transfer_needed=0)
@@ -583,12 +620,16 @@ class TestGET_ALL_MOVES_BTWN_ROWS_COLS:
         with pytest.raises(ValueError):
             get_all_moves_btwn_rows_cols(state_2d, 0, 1, n_transfer_needed=0)
 
-    def test_get_all_moves_btwn_rows_cols_raises_for_wrong_trailing_dimension(self) -> None:
+    def test_get_all_moves_btwn_rows_cols_raises_for_wrong_trailing_dimension(
+        self,
+    ) -> None:
         state_bad: np.ndarray = np.zeros((2, 3, 2), dtype=np.uint8)
         with pytest.raises(ValueError):
             get_all_moves_btwn_rows_cols(state_bad, 0, 1, n_transfer_needed=0)
 
-    def test_get_all_moves_btwn_rows_cols_raises_for_negative_n_transfer_needed(self) -> None:
+    def test_get_all_moves_btwn_rows_cols_raises_for_negative_n_transfer_needed(
+        self,
+    ) -> None:
         state: np.ndarray = _make_state([[1, 0], [0, 0]])
         with pytest.raises(ValueError):
             get_all_moves_btwn_rows_cols(state, 0, 1, n_transfer_needed=-1)
@@ -640,8 +681,12 @@ class TestGET_ALL_MOVES_BTWN_ROWS_COLS:
         for n_cols in range(1, 7):
             for _ in range(200):
                 source_row: np.ndarray = rng.integers(0, 2, size=n_cols, dtype=np.uint8)
-                destination_row: np.ndarray = rng.integers(0, 2, size=n_cols, dtype=np.uint8)
-                state: np.ndarray = _make_state([source_row.tolist(), destination_row.tolist()])
+                destination_row: np.ndarray = rng.integers(
+                    0, 2, size=n_cols, dtype=np.uint8
+                )
+                state: np.ndarray = _make_state(
+                    [source_row.tolist(), destination_row.tolist()]
+                )
 
                 exact_capacity: int = direct_cut_capacity(state, 0, 1)
                 from_cols, to_cols, n_planned = get_all_moves_btwn_rows_cols(
@@ -661,32 +706,42 @@ class TestGET_ALL_MOVES_BTWN_ROWS_COLS:
         for n_cols in range(1, 7):
             for _ in range(150):
                 source_row: np.ndarray = rng.integers(0, 2, size=n_cols, dtype=np.uint8)
-                destination_row: np.ndarray = rng.integers(0, 2, size=n_cols, dtype=np.uint8)
-                state: np.ndarray = _make_state([source_row.tolist(), destination_row.tolist()])
+                destination_row: np.ndarray = rng.integers(
+                    0, 2, size=n_cols, dtype=np.uint8
+                )
+                state: np.ndarray = _make_state(
+                    [source_row.tolist(), destination_row.tolist()]
+                )
 
                 full_capacity: int = direct_cut_capacity(state, 0, 1)
                 n_needed: int
                 for n_needed in range(1, full_capacity + 1):
-                    expected_from, expected_to, expected_n = _test_best_pure_bounded_plan(
-                        source_row=source_row,
-                        destination_row=destination_row,
-                        n_needed=n_needed,
+                    expected_from, expected_to, expected_n = (
+                        _test_best_pure_bounded_plan(
+                            source_row=source_row,
+                            destination_row=destination_row,
+                            n_needed=n_needed,
+                        )
                     )
                     if expected_n == 0:
                         continue
 
-                    observed_from, observed_to, observed_n = get_all_moves_btwn_rows_cols(
-                        state,
-                        0,
-                        1,
-                        n_transfer_needed=n_needed,
+                    observed_from, observed_to, observed_n = (
+                        get_all_moves_btwn_rows_cols(
+                            state,
+                            0,
+                            1,
+                            n_transfer_needed=n_needed,
+                        )
                     )
                     assert observed_n == expected_n
                     assert np.array_equal(observed_from, expected_from)
                     assert np.array_equal(observed_to, expected_to)
                     _assert_plan_is_legal(state, 0, 1, observed_from, observed_to)
 
-    def test_bounded_planner_prefers_central_destinations_within_pure_mode(self) -> None:
+    def test_bounded_planner_prefers_central_destinations_within_pure_mode(
+        self,
+    ) -> None:
         state: np.ndarray = _make_state([[1, 0, 1, 1, 0, 1], [0, 1, 0, 0, 1, 0]])
         from_cols, to_cols, n_planned = get_all_moves_btwn_rows_cols(
             state,
@@ -700,7 +755,9 @@ class TestGET_ALL_MOVES_BTWN_ROWS_COLS:
 
     def test_bounded_planner_truncates_exact_fallback_by_centrality(self) -> None:
         state: np.ndarray = _make_state([[1, 0, 0, 1, 0, 1], [1, 0, 0, 1, 1, 0]])
-        full_from, full_to, full_n = get_all_moves_btwn_rows_cols(state, 0, 1, n_transfer_needed=0)
+        full_from, full_to, full_n = get_all_moves_btwn_rows_cols(
+            state, 0, 1, n_transfer_needed=0
+        )
         assert full_n == 3
 
         bounded_from, bounded_to, bounded_n = get_all_moves_btwn_rows_cols(
@@ -710,11 +767,13 @@ class TestGET_ALL_MOVES_BTWN_ROWS_COLS:
             n_transfer_needed=2,
         )
 
-        expected_from, expected_to, expected_n = _test_truncate_by_destination_centrality(
-            from_cols=full_from,
-            to_cols=full_to,
-            destination_row=state[1, :, 0],
-            n_keep=2,
+        expected_from, expected_to, expected_n = (
+            _test_truncate_by_destination_centrality(
+                from_cols=full_from,
+                to_cols=full_to,
+                destination_row=state[1, :, 0],
+                n_keep=2,
+            )
         )
         assert bounded_n == 2
         assert expected_n == 2
@@ -722,14 +781,20 @@ class TestGET_ALL_MOVES_BTWN_ROWS_COLS:
         assert np.array_equal(bounded_to, expected_to)
         _assert_plan_is_legal(state, 0, 1, bounded_from, bounded_to)
 
-    def test_bounded_planner_truncates_unbounded_exact_plan_when_pure_is_insufficient(self) -> None:
+    def test_bounded_planner_truncates_unbounded_exact_plan_when_pure_is_insufficient(
+        self,
+    ) -> None:
         rng: np.random.Generator = np.random.default_rng(4)
         n_cols: int
         for n_cols in range(1, 7):
             for _ in range(250):
                 source_row: np.ndarray = rng.integers(0, 2, size=n_cols, dtype=np.uint8)
-                destination_row: np.ndarray = rng.integers(0, 2, size=n_cols, dtype=np.uint8)
-                state: np.ndarray = _make_state([source_row.tolist(), destination_row.tolist()])
+                destination_row: np.ndarray = rng.integers(
+                    0, 2, size=n_cols, dtype=np.uint8
+                )
+                state: np.ndarray = _make_state(
+                    [source_row.tolist(), destination_row.tolist()]
+                )
 
                 capacity: int = direct_cut_capacity(state, 0, 1)
                 if capacity <= 1:
@@ -752,17 +817,21 @@ class TestGET_ALL_MOVES_BTWN_ROWS_COLS:
                         1,
                         n_transfer_needed=0,
                     )
-                    expected_from, expected_to, expected_n = _test_truncate_by_destination_centrality(
-                        from_cols=full_from,
-                        to_cols=full_to,
-                        destination_row=destination_row,
-                        n_keep=n_needed,
+                    expected_from, expected_to, expected_n = (
+                        _test_truncate_by_destination_centrality(
+                            from_cols=full_from,
+                            to_cols=full_to,
+                            destination_row=destination_row,
+                            n_keep=n_needed,
+                        )
                     )
-                    observed_from, observed_to, observed_n = get_all_moves_btwn_rows_cols(
-                        state,
-                        0,
-                        1,
-                        n_transfer_needed=n_needed,
+                    observed_from, observed_to, observed_n = (
+                        get_all_moves_btwn_rows_cols(
+                            state,
+                            0,
+                            1,
+                            n_transfer_needed=n_needed,
+                        )
                     )
                     assert full_n == capacity
                     assert observed_n == expected_n
@@ -776,8 +845,12 @@ class TestGET_ALL_MOVES_BTWN_ROWS_COLS:
         for n_cols in range(1, 7):
             for _ in range(250):
                 source_row: np.ndarray = rng.integers(0, 2, size=n_cols, dtype=np.uint8)
-                destination_row: np.ndarray = rng.integers(0, 2, size=n_cols, dtype=np.uint8)
-                state: np.ndarray = _make_state([source_row.tolist(), destination_row.tolist()])
+                destination_row: np.ndarray = rng.integers(
+                    0, 2, size=n_cols, dtype=np.uint8
+                )
+                state: np.ndarray = _make_state(
+                    [source_row.tolist(), destination_row.tolist()]
+                )
 
                 capacity: int = direct_cut_capacity(state, 0, 1)
                 if capacity <= 1:
@@ -852,14 +925,18 @@ class TestPERFORM_TRANSFER:
         with pytest.raises(ValueError):
             perform_transfer(state_2d, 1, 0, 1)
 
-    def test_moves_exactly_requested_count_when_remaining_is_below_capacity(self) -> None:
+    def test_moves_exactly_requested_count_when_remaining_is_below_capacity(
+        self,
+    ) -> None:
         state: np.ndarray = _make_state([[1, 0, 1, 1], [0, 1, 0, 0]])
         new_state, moves, n_moved = perform_transfer(state, 2, 0, 1)
         assert n_moved == 2
         assert len(moves) == 2
         assert source_supply_at_boundary(new_state, 0) == 1
         assert int(np.sum(new_state[1, :, 0], dtype=np.int64)) == 3
-        assert int(np.sum(new_state, dtype=np.int64)) == int(np.sum(state, dtype=np.int64))
+        assert int(np.sum(new_state, dtype=np.int64)) == int(
+            np.sum(state, dtype=np.int64)
+        )
 
     def test_matches_exact_capacity_when_remaining_is_large(self) -> None:
         rng: np.random.Generator = np.random.default_rng(3)
@@ -867,8 +944,12 @@ class TestPERFORM_TRANSFER:
         for n_cols in range(1, 7):
             for _ in range(150):
                 source_row: np.ndarray = rng.integers(0, 2, size=n_cols, dtype=np.uint8)
-                destination_row: np.ndarray = rng.integers(0, 2, size=n_cols, dtype=np.uint8)
-                state: np.ndarray = _make_state([source_row.tolist(), destination_row.tolist()])
+                destination_row: np.ndarray = rng.integers(
+                    0, 2, size=n_cols, dtype=np.uint8
+                )
+                state: np.ndarray = _make_state(
+                    [source_row.tolist(), destination_row.tolist()]
+                )
                 expected_capacity: int = direct_cut_capacity(state, 0, 1)
                 total_before: int = int(np.sum(state, dtype=np.int64))
                 new_state, moves, n_moved = perform_transfer(
@@ -884,8 +965,12 @@ class TestPERFORM_TRANSFER:
     def test_exact_state_matches_direct_application_of_returned_plan(self) -> None:
         state: np.ndarray = _make_state([[1, 0, 1, 1], [0, 0, 1, 0]])
         new_state, moves, n_moved = perform_transfer(state, 2, 0, 1)
-        from_cols: np.ndarray = np.asarray([int(move.from_col) for move in moves], dtype=np.intp)
-        to_cols: np.ndarray = np.asarray([int(move.to_col) for move in moves], dtype=np.intp)
+        from_cols: np.ndarray = np.asarray(
+            [int(move.from_col) for move in moves], dtype=np.intp
+        )
+        to_cols: np.ndarray = np.asarray(
+            [int(move.to_col) for move in moves], dtype=np.intp
+        )
         expected_state: np.ndarray = _apply_planned_row_transfer(
             state=state,
             boundary_src_row=0,
@@ -903,12 +988,15 @@ class TestPERFORM_TRANSFER:
             [[0, 0, 0], [1, 1, 1]],
         ],
     )
-    def test_returns_no_moves_when_cut_capacity_is_zero(self, state_input: list[list[int]]) -> None:
+    def test_returns_no_moves_when_cut_capacity_is_zero(
+        self, state_input: list[list[int]]
+    ) -> None:
         state: np.ndarray = _make_state(state_input)
         new_state, moves, n_moved = perform_transfer(state, 2, 0, 1)
         assert n_moved == 0
         assert moves == []
         assert np.array_equal(new_state, state)
+
 
 class Test_PLAN_HORIZONTAL_ROUNDS_TO_TARGET:
     def test_returns_empty_when_row_already_matches_target(self) -> None:
@@ -960,6 +1048,7 @@ class Test_PLAN_HORIZONTAL_ROUNDS_TO_TARGET:
         }
         expected_edges: set[tuple[int, int]] = {(1, 0), (2, 1), (3, 4), (6, 7)}
         assert observed_edges == expected_edges
+
 
 class TestENSURE_SOURCE_SUPPLY:
     def test_raises_for_wrong_shape(self) -> None:
@@ -1038,7 +1127,9 @@ class TestENSURE_SOURCE_SUPPLY:
         assert status["kind"] == "success"
         assert status["unmet_delta_S"] == 0
 
-    def test_exact_mode_reaches_exact_requested_boundary_increase_when_possible(self) -> None:
+    def test_exact_mode_reaches_exact_requested_boundary_increase_when_possible(
+        self,
+    ) -> None:
         state: np.ndarray = _make_state([[1, 0, 1], [0, 0, 0]])
         before_supply: int = source_supply_at_boundary(state, 1)
         new_state, move_rounds, achieved_delta_S, status = ensure_source_supply(
@@ -1077,14 +1168,20 @@ class TestENSURE_SOURCE_SUPPLY:
         for n_cols in range(2, 7):
             for _ in range(200):
                 source_row: np.ndarray = rng.integers(0, 2, size=n_cols, dtype=np.uint8)
-                boundary_row: np.ndarray = rng.integers(0, 2, size=n_cols, dtype=np.uint8)
-                state: np.ndarray = _make_state([source_row.tolist(), boundary_row.tolist()])
-                exact_state, exact_rounds, exact_delta, exact_status = ensure_source_supply(
-                    state=state,
-                    boundary_src_row=1,
-                    search_limit_row=0,
-                    delta_S=1,
-                    fill_mode="exact",
+                boundary_row: np.ndarray = rng.integers(
+                    0, 2, size=n_cols, dtype=np.uint8
+                )
+                state: np.ndarray = _make_state(
+                    [source_row.tolist(), boundary_row.tolist()]
+                )
+                exact_state, exact_rounds, exact_delta, exact_status = (
+                    ensure_source_supply(
+                        state=state,
+                        boundary_src_row=1,
+                        search_limit_row=0,
+                        delta_S=1,
+                        fill_mode="exact",
+                    )
                 )
                 opp_state, opp_rounds, opp_delta, opp_status = ensure_source_supply(
                     state=state,
@@ -1095,10 +1192,16 @@ class TestENSURE_SOURCE_SUPPLY:
                 )
                 assert opp_delta >= exact_delta
                 assert len(opp_rounds) == len(exact_rounds)
-                assert int(np.sum(exact_state, dtype=np.int64)) == int(np.sum(state, dtype=np.int64))
-                assert int(np.sum(opp_state, dtype=np.int64)) == int(np.sum(state, dtype=np.int64))
+                assert int(np.sum(exact_state, dtype=np.int64)) == int(
+                    np.sum(state, dtype=np.int64)
+                )
+                assert int(np.sum(opp_state, dtype=np.int64)) == int(
+                    np.sum(state, dtype=np.int64)
+                )
 
-    def test_returns_insufficient_atoms_when_source_interval_cannot_supply_request(self) -> None:
+    def test_returns_insufficient_atoms_when_source_interval_cannot_supply_request(
+        self,
+    ) -> None:
         state: np.ndarray = _make_state([[0, 0, 0], [0, 0, 0], [1, 0, 0]])
         new_state, move_rounds, achieved_delta_S, status = ensure_source_supply(
             state=state,
@@ -1113,7 +1216,9 @@ class TestENSURE_SOURCE_SUPPLY:
         assert np.array_equal(new_state, state)
         assert move_rounds == []
 
-    def test_partial_blocked_commits_progress_when_some_supply_reaches_boundary(self) -> None:
+    def test_partial_blocked_commits_progress_when_some_supply_reaches_boundary(
+        self,
+    ) -> None:
         state: np.ndarray = _make_state(
             [
                 [0, 0, 0, 0],
@@ -1137,7 +1242,9 @@ class TestENSURE_SOURCE_SUPPLY:
         assert isinstance(status["blocking_row"], int)
         assert len(move_rounds) > 0
 
-    def test_partial_blocked_with_zero_progress_is_allowed_when_immediately_blocked(self) -> None:
+    def test_partial_blocked_with_zero_progress_is_allowed_when_immediately_blocked(
+        self,
+    ) -> None:
         state: np.ndarray = _make_state(
             [
                 [1, 1, 0, 0],
@@ -1181,7 +1288,9 @@ class TestENSURE_SOURCE_SUPPLY:
         assert after_supply - before_supply == 1
         assert len(move_rounds) >= 2
 
-    def test_never_touches_rows_outside_allowed_interval_when_search_limit_above_boundary(self) -> None:
+    def test_never_touches_rows_outside_allowed_interval_when_search_limit_above_boundary(
+        self,
+    ) -> None:
         state: np.ndarray = _make_state(
             [
                 [1, 0, 1],
@@ -1202,7 +1311,9 @@ class TestENSURE_SOURCE_SUPPLY:
         assert np.array_equal(new_state[0, :, :], protected_top)
         assert np.array_equal(new_state[3, :, :], protected_bottom)
 
-    def test_never_touches_rows_outside_allowed_interval_when_search_limit_below_boundary(self) -> None:
+    def test_never_touches_rows_outside_allowed_interval_when_search_limit_below_boundary(
+        self,
+    ) -> None:
         state: np.ndarray = _make_state(
             [
                 [1, 0, 1],
@@ -1259,7 +1370,9 @@ class TestENSURE_SOURCE_SUPPLY:
                 after_supply: int = source_supply_at_boundary(new_state, 2)
                 assert achieved_delta_S == after_supply - before_supply
 
-    def test_randomized_moves_stay_within_interval_and_move_toward_boundary(self) -> None:
+    def test_randomized_moves_stay_within_interval_and_move_toward_boundary(
+        self,
+    ) -> None:
         rng: np.random.Generator = np.random.default_rng(31)
         n_cols: int
         for n_cols in range(2, 7):
@@ -1288,7 +1401,9 @@ class TestENSURE_SOURCE_SUPPLY:
                         assert low_row <= int(move.from_row) <= high_row
                         assert low_row <= int(move.to_row) <= high_row
                         assert abs(int(move.to_row) - int(move.from_row)) == 1
-                        assert abs(boundary_src_row - int(move.to_row)) < abs(boundary_src_row - int(move.from_row))
+                        assert abs(boundary_src_row - int(move.to_row)) < abs(
+                            boundary_src_row - int(move.from_row)
+                        )
 
 
 def _make_state_from_rows(*rows: list[int]) -> np.ndarray:
@@ -1336,25 +1451,25 @@ def _replay_horizontal_rounds(
 
         move: Move
         for move in round_moves:
-            assert int(move.from_row) == boundary_dst_row, (
-                f"Round {round_index} contains move from unexpected row: {move}."
-            )
-            assert int(move.to_row) == boundary_dst_row, (
-                f"Round {round_index} contains move to unexpected row: {move}."
-            )
-            assert abs(int(move.to_col) - int(move.from_col)) == 1, (
-                f"Round {round_index} contains non-unit horizontal move: {move}."
-            )
+            assert (
+                int(move.from_row) == boundary_dst_row
+            ), f"Round {round_index} contains move from unexpected row: {move}."
+            assert (
+                int(move.to_row) == boundary_dst_row
+            ), f"Round {round_index} contains move to unexpected row: {move}."
+            assert (
+                abs(int(move.to_col) - int(move.from_col)) == 1
+            ), f"Round {round_index} contains non-unit horizontal move: {move}."
 
             from_col: int = int(move.from_col)
             to_col: int = int(move.to_col)
 
-            assert from_col not in from_cols_seen, (
-                f"Round {round_index} reuses source column {from_col}."
-            )
-            assert to_col not in to_cols_seen, (
-                f"Round {round_index} reuses destination column {to_col}."
-            )
+            assert (
+                from_col not in from_cols_seen
+            ), f"Round {round_index} reuses source column {from_col}."
+            assert (
+                to_col not in to_cols_seen
+            ), f"Round {round_index} reuses destination column {to_col}."
 
             from_cols_seen.add(from_col)
             to_cols_seen.add(to_col)
@@ -1365,16 +1480,18 @@ def _replay_horizontal_rounds(
             )
 
         total_before: int = int(np.sum(work_state[:, :, 0], dtype=np.int64))
-        row_before: int = int(np.sum(work_state[boundary_dst_row, :, 0], dtype=np.int64))
+        row_before: int = int(
+            np.sum(work_state[boundary_dst_row, :, 0], dtype=np.int64)
+        )
 
         next_state: np.ndarray = move_atoms_noiseless(work_state.copy(), round_moves)
 
         total_after: int = int(np.sum(next_state[:, :, 0], dtype=np.int64))
         row_after: int = int(np.sum(next_state[boundary_dst_row, :, 0], dtype=np.int64))
 
-        assert total_after == total_before, (
-            f"Round {round_index} lost or created atoms under noiseless realization."
-        )
+        assert (
+            total_after == total_before
+        ), f"Round {round_index} lost or created atoms under noiseless realization."
         assert row_after == row_before, (
             f"Round {round_index} changed destination-row atom count under "
             f"noiseless realization."
@@ -1392,13 +1509,17 @@ def _capacity_after_each_round(
     boundary_dst_row: int,
 ) -> list[int]:
     """Return exact direct cut capacity after each replayed round, including the initial value."""
-    capacities: list[int] = [direct_cut_capacity(state, boundary_src_row, boundary_dst_row)]
+    capacities: list[int] = [
+        direct_cut_capacity(state, boundary_src_row, boundary_dst_row)
+    ]
     work_state: np.ndarray = state.copy()
 
     round_moves: list[Move]
     for round_moves in move_rounds:
         work_state = move_atoms_noiseless(work_state.copy(), round_moves)
-        capacities.append(direct_cut_capacity(work_state, boundary_src_row, boundary_dst_row))
+        capacities.append(
+            direct_cut_capacity(work_state, boundary_src_row, boundary_dst_row)
+        )
 
     return capacities
 
@@ -1489,7 +1610,9 @@ class TestENSURE_BOUNDARY_ROW_CUT_CAPACITY_HORIZONTAL:
       realignment when the intended action is operationally unambiguous.
     """
 
-    def test_returns_success_and_leaves_state_unchanged_when_delta_t_is_zero(self) -> None:
+    def test_returns_success_and_leaves_state_unchanged_when_delta_t_is_zero(
+        self,
+    ) -> None:
         """A zero request should succeed without executing any moves."""
         state: np.ndarray = _make_state_from_rows(
             [0, 1, 1, 1, 0, 0, 0],
@@ -1657,7 +1780,9 @@ class TestENSURE_BOUNDARY_ROW_CUT_CAPACITY_HORIZONTAL:
         assert achieved_delta_t == 0
         assert status["kind"] == "infeasible_request"
 
-    def test_already_horizontally_saturated_makes_any_positive_gain_infeasible(self) -> None:
+    def test_already_horizontally_saturated_makes_any_positive_gain_infeasible(
+        self,
+    ) -> None:
         """If ``T`` already equals ``min(S, V_dst)``, any positive ``delta_T`` is infeasible."""
         state: np.ndarray = _make_state_from_rows(
             [0, 1, 0, 0, 0],
@@ -1934,7 +2059,12 @@ class TestENSURE_BOUNDARY_ROW_CUT_CAPACITY_HORIZONTAL:
         assert len(move_rounds[0]) == 1
 
         move: Move = move_rounds[0][0]
-        assert (int(move.from_row), int(move.from_col), int(move.to_row), int(move.to_col)) == (
+        assert (
+            int(move.from_row),
+            int(move.from_col),
+            int(move.to_row),
+            int(move.to_col),
+        ) == (
             1,
             4,
             1,
@@ -1954,7 +2084,9 @@ class TestENSURE_BOUNDARY_ROW_CUT_CAPACITY_HORIZONTAL:
         )
 
     @pytest.mark.parametrize(("delta_t",), [(1,), (2,)])
-    def test_patterned_harder_case_succeeds_for_delta_t_one_and_two(self, delta_t: int) -> None:
+    def test_patterned_harder_case_succeeds_for_delta_t_one_and_two(
+        self, delta_t: int
+    ) -> None:
         """A nontrivial vacancy pattern should support moderate requested gains."""
         src_row: list[int] = [0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 1, 0, 1]
         dst_row: list[int] = [0, 1, 1, 1, 1, 0, 1, 1, 0, 1, 1, 1, 0]
@@ -2108,7 +2240,9 @@ class TestENSURE_BOUNDARY_ROW_CUT_CAPACITY_HORIZONTAL:
                 status=status,
             )
 
-    def test_avoids_gratuitous_post_success_rounds_for_canonical_one_round_case(self) -> None:
+    def test_avoids_gratuitous_post_success_rounds_for_canonical_one_round_case(
+        self,
+    ) -> None:
         """Once the requested gain is first achieved, the helper should stop the episode."""
         state: np.ndarray = _make_state_from_rows(
             [0, 1, 1, 1, 0, 0, 0],
@@ -2155,7 +2289,9 @@ class TestENSURE_BOUNDARY_ROW_CUT_CAPACITY_HORIZONTAL:
             status=status,
         )
 
-    def test_avoids_gratuitous_post_success_rounds_for_patterned_one_round_delta_two_case(self) -> None:
+    def test_avoids_gratuitous_post_success_rounds_for_patterned_one_round_delta_two_case(
+        self,
+    ) -> None:
         """
         On the patterned case, ``delta_T = 2`` should be achieved within one round.
 
@@ -2251,6 +2387,7 @@ class TestENSURE_BOUNDARY_ROW_CUT_CAPACITY_HORIZONTAL:
         if status["kind"] != "success":
             assert status["kind"] == "cannot_solve_within_constraints"
 
+
 def _make_state_from_rows(*rows: list[int]) -> np.ndarray:
     """Build a BCv2-style single-species state array from 2D row data."""
     arr_2d: np.ndarray = np.asarray(rows, dtype=np.uint8)
@@ -2274,7 +2411,9 @@ def _interval_bounds(
     search_limit_row: int,
 ) -> tuple[int, int]:
     """Return inclusive row bounds for the allowed destination interval."""
-    return min(boundary_dst_row, search_limit_row), max(boundary_dst_row, search_limit_row)
+    return min(boundary_dst_row, search_limit_row), max(
+        boundary_dst_row, search_limit_row
+    )
 
 
 def _region_atom_count(
@@ -2349,9 +2488,9 @@ def _replay_vertical_rounds(
                 f"Round {round_index} contains move to row outside allowed "
                 f"destination interval: {move}."
             )
-            assert abs(to_row - from_row) <= 1, (
-                f"Round {round_index} contains non-adjacent-row move: {move}."
-            )
+            assert (
+                abs(to_row - from_row) <= 1
+            ), f"Round {round_index} contains non-adjacent-row move: {move}."
             assert abs(to_col - from_col) <= 1, (
                 f"Round {round_index} contains move violating local row-to-row "
                 f"geometry |src_col - dst_col| <= 1: {move}."
@@ -2360,12 +2499,12 @@ def _replay_vertical_rounds(
             src_site: tuple[int, int] = (from_row, from_col)
             dst_site: tuple[int, int] = (to_row, to_col)
 
-            assert src_site not in sources_seen, (
-                f"Round {round_index} reuses source site {src_site}."
-            )
-            assert dst_site not in dests_seen, (
-                f"Round {round_index} reuses destination site {dst_site}."
-            )
+            assert (
+                src_site not in sources_seen
+            ), f"Round {round_index} reuses source site {src_site}."
+            assert (
+                dst_site not in dests_seen
+            ), f"Round {round_index} reuses destination site {dst_site}."
 
             sources_seen.add(src_site)
             dests_seen.add(dst_site)
@@ -2391,9 +2530,9 @@ def _replay_vertical_rounds(
             search_limit_row=search_limit_row,
         )
 
-        assert total_after == total_before, (
-            f"Round {round_index} lost or created atoms under noiseless realization."
-        )
+        assert (
+            total_after == total_before
+        ), f"Round {round_index} lost or created atoms under noiseless realization."
         assert region_after == region_before, (
             f"Round {round_index} changed destination-interval atom count under "
             f"noiseless realization."
@@ -2449,9 +2588,9 @@ def _assert_no_move_crosses_into_source_row(
     for round_moves in move_rounds:
         move: Move
         for move in round_moves:
-            assert int(move.to_row) != boundary_src_row, (
-                f"Returned move illegally targets the source row: {move}."
-            )
+            assert (
+                int(move.to_row) != boundary_src_row
+            ), f"Returned move illegally targets the source row: {move}."
 
 
 def _assert_strict_vertical_helper_invariants(
@@ -2492,9 +2631,9 @@ def _assert_strict_vertical_helper_invariants(
     )
 
     assert _total_count(after) == _total_count(before)
-    assert _region_atom_count(after, boundary_dst_row, search_limit_row) == _region_atom_count(
-        before, boundary_dst_row, search_limit_row
-    )
+    assert _region_atom_count(
+        after, boundary_dst_row, search_limit_row
+    ) == _region_atom_count(before, boundary_dst_row, search_limit_row)
     assert np.array_equal(after[boundary_src_row, :, 0], before[boundary_src_row, :, 0])
 
     t_before: int = direct_cut_capacity(before, boundary_src_row, boundary_dst_row)
@@ -2539,7 +2678,9 @@ class TestENSURE_BOUNDARY_ROW_CUT_CAPACITY_VERTICAL:
         ``"cannot_solve_within_constraints"``.
     """
 
-    def test_returns_success_and_leaves_state_unchanged_when_delta_t_is_zero(self) -> None:
+    def test_returns_success_and_leaves_state_unchanged_when_delta_t_is_zero(
+        self,
+    ) -> None:
         """A zero request should succeed without executing any moves."""
         state: np.ndarray = _make_state_from_rows(
             [1, 1, 0, 1, 0],
@@ -2660,7 +2801,9 @@ class TestENSURE_BOUNDARY_ROW_CUT_CAPACITY_VERTICAL:
         assert achieved_delta_t == 0
         assert status["kind"] == "infeasible_request"
 
-    def test_positive_delta_is_treated_literally_even_if_t_before_is_already_large(self) -> None:
+    def test_positive_delta_is_treated_literally_even_if_t_before_is_already_large(
+        self,
+    ) -> None:
         """
         A positive request still means "gain more T", not "already sufficient".
 
@@ -3067,6 +3210,7 @@ class TestENSURE_BOUNDARY_ROW_CUT_CAPACITY_VERTICAL:
             assert status["kind"] == "cannot_solve_within_constraints"
             assert status["blocking_row"] is not None
 
+
 def _replay_rounds(
     state: np.ndarray,
     move_rounds: list[list[Move]],
@@ -3085,26 +3229,26 @@ def _replay_rounds(
             src_site: tuple[int, int] = (int(move.from_row), int(move.from_col))
             dst_site: tuple[int, int] = (int(move.to_row), int(move.to_col))
 
-            assert src_site not in sources_seen, (
-                f"Round {round_index} reuses source site {src_site}."
-            )
-            assert dst_site not in dests_seen, (
-                f"Round {round_index} reuses destination site {dst_site}."
-            )
+            assert (
+                src_site not in sources_seen
+            ), f"Round {round_index} reuses source site {src_site}."
+            assert (
+                dst_site not in dests_seen
+            ), f"Round {round_index} reuses destination site {dst_site}."
             sources_seen.add(src_site)
             dests_seen.add(dst_site)
 
-            assert int(work_state[int(move.from_row), int(move.from_col), 0]) == 1, (
-                f"Round {round_index} tries to move from an empty site {src_site}."
-            )
+            assert (
+                int(work_state[int(move.from_row), int(move.from_col), 0]) == 1
+            ), f"Round {round_index} tries to move from an empty site {src_site}."
 
         total_before: int = _total_count(work_state)
         next_state: np.ndarray = move_atoms_noiseless(work_state.copy(), round_moves)
         total_after: int = _total_count(next_state)
 
-        assert total_after == total_before, (
-            f"Round {round_index} lost or created atoms under noiseless realization."
-        )
+        assert (
+            total_after == total_before
+        ), f"Round {round_index} lost or created atoms under noiseless realization."
         work_state = next_state
 
     return work_state
@@ -3183,10 +3327,21 @@ def _assert_cut_capacity_coordinator_invariants(
         if requested_delta_t == 0:
             assert status["chosen_mode"] == "none"
         else:
-            assert status["chosen_mode"] in {"horizontal", "vertical", "vertical_then_horizontal", "horizontal_then_vertical"}
+            assert status["chosen_mode"] in {
+                "horizontal",
+                "vertical",
+                "vertical_then_horizontal",
+                "horizontal_then_vertical",
+            }
     else:
         assert achieved_delta_t < int(status["requested_delta_T"])
-        assert status["chosen_mode"] in {"horizontal", "vertical", "none", "vertical_then_horizontal", "horizontal_then_vertical"}
+        assert status["chosen_mode"] in {
+            "horizontal",
+            "vertical",
+            "none",
+            "vertical_then_horizontal",
+            "horizontal_then_vertical",
+        }
         if status["horizontal_status_kind"] is not None:
             assert status["horizontal_status_kind"] != "success"
         if status["vertical_status_kind"] is not None:
@@ -3259,7 +3414,9 @@ class TestENSURE_CUT_CAPACITY:
         ``"cannot_solve_within_constraints"``.
     """
 
-    def test_returns_success_and_leaves_state_unchanged_when_delta_t_is_zero(self) -> None:
+    def test_returns_success_and_leaves_state_unchanged_when_delta_t_is_zero(
+        self,
+    ) -> None:
         """A zero request should succeed without executing any moves."""
         state: np.ndarray = _make_state_from_rows(
             [0, 1, 1, 1, 0, 0, 0],
@@ -3363,7 +3520,9 @@ class TestENSURE_CUT_CAPACITY:
                 target_end_col=1,
             )
 
-    def test_current_fallback_policy_prefers_horizontal_when_both_are_plausible(self) -> None:
+    def test_current_fallback_policy_prefers_horizontal_when_both_are_plausible(
+        self,
+    ) -> None:
         """One explicit test locks the current fallback order for later comparison."""
         state: np.ndarray = _make_state_from_rows(
             [0, 1, 1, 1, 0, 0, 0],
@@ -3414,11 +3573,10 @@ class TestENSURE_CUT_CAPACITY:
         )
 
         assert status["kind"] == "success"
-        assert status["chosen_mode"] =="horizontal"
+        assert status["chosen_mode"] == "horizontal"
         assert len(move_rounds) == 1
         assert achieved_delta_t == 1
-    
-    
+
     def test_horizontal_helper_parallelizes_chain_move_in_two_rounds(self) -> None:
         """A horizontally solvable case should parallelize moves when possible."""
         state: np.ndarray = _make_state_from_rows(
@@ -3437,13 +3595,15 @@ class TestENSURE_CUT_CAPACITY:
         )
 
         assert status["kind"] == "success"
-        assert status["chosen_mode"] =="horizontal"
+        assert status["chosen_mode"] == "horizontal"
         assert len(move_rounds) == 2
         assert achieved_delta_t == 2
-    
-    def test_horizontal_helper_parallelizes_chain_move_in_two_rounds_left_and_right_moving(self) -> None:
-        """A horizontally solvable case should parallelize moves when possible, 
-           even if atoms are moving in different directions."""
+
+    def test_horizontal_helper_parallelizes_chain_move_in_two_rounds_left_and_right_moving(
+        self,
+    ) -> None:
+        """A horizontally solvable case should parallelize moves when possible,
+        even if atoms are moving in different directions."""
         state: np.ndarray = _make_state_from_rows(
             [0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0],
             [1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1],
@@ -3460,13 +3620,13 @@ class TestENSURE_CUT_CAPACITY:
         )
 
         assert status["kind"] == "success"
-        assert status["chosen_mode"] =="horizontal"
+        assert status["chosen_mode"] == "horizontal"
         assert len(move_rounds) == 2
         assert achieved_delta_t == 3
-    
+
     def test_horizontal_helper_parallelizes_chain_move_in_min_rounds_hard(self) -> None:
-        """A horizontally solvable case should parallelize moves when possible, 
-           even if atoms are moving in different directions."""
+        """A horizontally solvable case should parallelize moves when possible,
+        even if atoms are moving in different directions."""
         state: np.ndarray = _make_state_from_rows(
             [0, 0, 1, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0],
             [0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0],
@@ -3483,7 +3643,7 @@ class TestENSURE_CUT_CAPACITY:
         )
 
         assert status["kind"] == "success"
-        assert status["chosen_mode"] =="horizontal"
+        assert status["chosen_mode"] == "horizontal"
         assert len(move_rounds) == 1
         assert achieved_delta_t == 3
 
@@ -3538,7 +3698,9 @@ class TestENSURE_CUT_CAPACITY:
 
         assert status["kind"] == "success"
         assert status["chosen_mode"] in {"vertical_then_horizontal"}
-        assert len(move_rounds) == 2 # something like [[Move(1,1,0,1)], [Move(1,2,1,1), Move(1,3,1,2)]]
+        assert (
+            len(move_rounds) == 2
+        )  # something like [[Move(1,1,0,1)], [Move(1,2,1,1), Move(1,3,1,2)]]
 
         _assert_cut_capacity_coordinator_invariants(
             before=state,
@@ -3549,8 +3711,10 @@ class TestENSURE_CUT_CAPACITY:
             achieved_delta_t=achieved_delta_t,
             status=status,
         )
-    
-    def test_REGRESSION_succeeds_when_both_horiz_and_vert_clearing_needed_in_multiple_rounds(self) -> None:
+
+    def test_REGRESSION_succeeds_when_both_horiz_and_vert_clearing_needed_in_multiple_rounds(
+        self,
+    ) -> None:
         state: np.ndarray = _make_state_from_rows(
             [1, 0, 1, 1, 1, 1, 1],
             [1, 1, 1, 1, 1, 1, 1],
@@ -3582,9 +3746,10 @@ class TestENSURE_CUT_CAPACITY:
             achieved_delta_t=achieved_delta_t,
             status=status,
         )
-    
 
-    def test_succeeds_on_case_solved_by_vertical_helper_after_at_most_one_failed_attempt(self) -> None:
+    def test_succeeds_on_case_solved_by_vertical_helper_after_at_most_one_failed_attempt(
+        self,
+    ) -> None:
         """
         A vertically solvable case should succeed even if the coordinator first tries
         another mode that cannot complete the request.
@@ -3618,7 +3783,9 @@ class TestENSURE_CUT_CAPACITY:
             status=status,
         )
 
-    def test_when_both_modes_could_succeed_coordinator_commits_to_only_one(self) -> None:
+    def test_when_both_modes_could_succeed_coordinator_commits_to_only_one(
+        self,
+    ) -> None:
         """The coordinator should not apply both helpers in a single episode."""
         state: np.ndarray = _make_state_from_rows(
             [1, 0, 1, 0, 1, 0],
@@ -3659,7 +3826,6 @@ class TestENSURE_CUT_CAPACITY:
             achieved_delta_t=achieved_delta_t,
             status=status,
         )
-
 
     def test_propagates_vertical_blocking_row_when_vertical_fails(self) -> None:
         """
@@ -3738,7 +3904,9 @@ class TestENSURE_CUT_CAPACITY:
         )
 
     @pytest.mark.parametrize("seed", [0, 1, 2, 3, 4, 5])
-    def test_randomized_requests_around_coarse_cap_preserve_invariants(self, seed: int) -> None:
+    def test_randomized_requests_around_coarse_cap_preserve_invariants(
+        self, seed: int
+    ) -> None:
         """
         Random requests sampled inside and slightly above a coarse combined cap
         should satisfy the full invariant set.
@@ -3756,7 +3924,9 @@ class TestENSURE_CUT_CAPACITY:
             if bool(rng.integers(0, 2)):
                 boundary_src_row = 0
                 boundary_dst_row = 1
-                destination_search_limit_row = int(rng.integers(boundary_dst_row + 1, n_rows))
+                destination_search_limit_row = int(
+                    rng.integers(boundary_dst_row + 1, n_rows)
+                )
             else:
                 boundary_src_row = n_rows - 1
                 boundary_dst_row = n_rows - 2
@@ -3803,7 +3973,9 @@ class TestENSURE_CUT_CAPACITY:
 class TestENSURE_CUT_CAPACITY_WITH_STUBS:
     """Coordinator unit-style tests with stubbed helper results."""
 
-    def test_stubbed_horizontal_success_short_circuits_vertical(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_stubbed_horizontal_success_short_circuits_vertical(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """If horizontal succeeds, vertical should not be called."""
         state: np.ndarray = _make_state_from_rows(
             [1, 0, 1],
@@ -3834,7 +4006,9 @@ class TestENSURE_CUT_CAPACITY_WITH_STUBS:
 
         def fake_vertical(**kwargs):
             calls["vertical"] += 1
-            raise AssertionError("vertical should not be called after horizontal success")
+            raise AssertionError(
+                "vertical should not be called after horizontal success"
+            )
 
         monkeypatch.setattr(
             helpers,
@@ -3864,7 +4038,9 @@ class TestENSURE_CUT_CAPACITY_WITH_STUBS:
         assert status["chosen_mode"] == "horizontal"
         assert move_rounds == [[Move(1, 2, 1, 1)]]
 
-    def test_stubbed_vertical_success_after_horizontal_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_stubbed_vertical_success_after_horizontal_failure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """If horizontal fails and vertical succeeds, coordinator should return vertical success."""
         state: np.ndarray = _make_state_from_rows(
             [1, 0, 1],
@@ -3939,7 +4115,9 @@ class TestENSURE_CUT_CAPACITY_WITH_STUBS:
         assert status["horizontal_status_kind"] == "cannot_solve_within_constraints"
         assert status["vertical_status_kind"] == "success"
 
-    def test_stubbed_combined_failure_preserves_metadata(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_stubbed_combined_failure_preserves_metadata(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """If both subhelpers fail, coordinator should preserve both statuses and blocking_row."""
         state: np.ndarray = _make_state_from_rows(
             [1, 0, 1],
@@ -4007,6 +4185,7 @@ class TestENSURE_CUT_CAPACITY_WITH_STUBS:
         assert status["vertical_status_kind"] == "cannot_solve_within_constraints"
         assert status["blocking_row"] == 2
 
+
 def _assert_controller_invariants(
     before: np.ndarray,
     after: np.ndarray,
@@ -4060,7 +4239,9 @@ class TestMOVE_ACROSS_ROWS:
             (0.41, 5),
         ],
     )
-    def test_batch_goal_rounding_edge_cases(self, C: float, expected_batch_goal: int) -> None:
+    def test_batch_goal_rounding_edge_cases(
+        self, C: float, expected_batch_goal: int
+    ) -> None:
         n_cols: int = 10
         computed: int = min(7, int(np.ceil(C * n_cols)))
         assert computed == expected_batch_goal
@@ -4125,7 +4306,7 @@ class TestMOVE_ACROSS_ROWS:
                 status=status,
             )
 
-    @pytest.mark.parametrize('C', [0.1, 0.3, 0.5, 0.7, 0.9])
+    @pytest.mark.parametrize("C", [0.1, 0.3, 0.5, 0.7, 0.9])
     def test_REGRESSION_move_across_rows_recurses_for_source_shortage(self, C) -> None:
         state: np.ndarray = _make_state_from_rows(
             [0, 0, 0, 0, 0, 0, 0, 0],
@@ -4152,8 +4333,11 @@ class TestMOVE_ACROSS_ROWS:
 
         assert transferred == 6
 
+
 class TestMOVE_ACROSS_ROWS_WITH_STUBS:
-    def test_cut_stall_short_circuits_without_calling_source_helper(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_cut_stall_short_circuits_without_calling_source_helper(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         state: np.ndarray = _make_state_from_rows(
             [1, 0, 1, 0, 0],
             [1, 1, 1, 1, 0],
@@ -4163,7 +4347,9 @@ class TestMOVE_ACROSS_ROWS_WITH_STUBS:
 
         def fake_source(**kwargs):
             calls["source"] += 1
-            raise AssertionError("source helper should not be called in this stalled cut episode.")
+            raise AssertionError(
+                "source helper should not be called in this stalled cut episode."
+            )
 
         def fake_cut(**kwargs):
             calls["cut"] += 1
@@ -4171,7 +4357,11 @@ class TestMOVE_ACROSS_ROWS_WITH_STUBS:
                 state.copy(),
                 [],
                 0,
-                {"kind": "cannot_solve_within_constraints", "achieved_delta_T": 0, "n_rounds": 0},
+                {
+                    "kind": "cannot_solve_within_constraints",
+                    "achieved_delta_T": 0,
+                    "n_rounds": 0,
+                },
             )
 
         monkeypatch.setattr(helpers, "ensure_source_supply", fake_source)

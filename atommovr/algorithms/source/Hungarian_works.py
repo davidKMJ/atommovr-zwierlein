@@ -5,7 +5,12 @@ from scipy.optimize import linear_sum_assignment
 from scipy.sparse import csr_matrix
 
 from atommovr.algorithms.Algorithm_class import Algorithm
-from atommovr.utils.core import random_loading, generate_middle_fifty, _int_sum, Configurations
+from atommovr.utils.core import (
+    random_loading,
+    generate_middle_fifty,
+    _int_sum,
+    Configurations,
+)
 from atommovr.utils.move_utils import (
     Move,
     move_atoms,
@@ -16,6 +21,7 @@ from atommovr.utils.move_utils import (
 from atommovr.algorithms.source.ejection import ejection
 from atommovr.algorithms.source.scaling_lower_bound import make_cost_matrix_square
 from atommovr.algorithms.source.PPSU_weight_matching import bttl_threshold
+
 
 def _assert_unique_round_sources(move_round: list[Move]) -> None:
     seen_sources: set[tuple[int, int]] = set()
@@ -38,6 +44,7 @@ def _assert_unique_round_sources(move_round: list[Move]) -> None:
         seen_sources.add(src)
         seen_moves.add(key)
 
+
 def _dedup_exact_moves(move_round: list[Move]) -> list[Move]:
     """Remove exact duplicate moves while preserving first occurrence order."""
     deduped: list[Move] = []
@@ -57,6 +64,7 @@ def _dedup_exact_moves(move_round: list[Move]) -> list[Move]:
 
     return deduped
 
+
 def _assert_unique_sources(move_round: list[Move]) -> None:
     """Enforce one source site per round."""
     seen: set[tuple[int, int]] = set()
@@ -65,6 +73,7 @@ def _assert_unique_sources(move_round: list[Move]) -> None:
         if src in seen:
             raise RuntimeError(f"Duplicate source in move round: {move_round}")
         seen.add(src)
+
 
 def parallel_LBAP_algorithm_works(
     atom_arrays: np.ndarray,
@@ -343,7 +352,9 @@ def parallel_Hungarian_algorithm_works(
             Hungarian_success_flag = True
         round_count += 1
         if round_count == round_lim:
-            raise RuntimeError(f"Parallel Hungarian algorithm hit round count limit. Consider increasing round count limit (currently {round_lim})")
+            raise RuntimeError(
+                f"Parallel Hungarian algorithm hit round count limit. Consider increasing round count limit (currently {round_lim})"
+            )
 
     # 4. Eject to certain geoemetry
     if do_ejection:

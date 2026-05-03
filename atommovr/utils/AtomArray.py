@@ -113,7 +113,7 @@ class AtomArray:
         params: PhysicalParams | None = None,
         error_model: ErrorModel | None = None,
         geom: ArrayGeometry = ArrayGeometry.RECTANGULAR,
-    )-> None:
+    ) -> None:
         self.geom = geom
         if params is None:
             params = PhysicalParams()
