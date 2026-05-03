@@ -34,8 +34,6 @@ def naive_par_Hung(
     arrays = copy.deepcopy(rbcs_arrays)
     round_count = 0
 
-    print(np.sum(arrays.matrix[:, :, 0]) >= np.sum(arrays.target_Rb))
-    print(np.sum(arrays.matrix[:, :, 1]) >= np.sum(arrays.target_Cs))
     if not check_atom_enough(rbcs_arrays):  # == False: linting error
         return rbcs_arrays, [], False
 
