@@ -1936,9 +1936,9 @@ def _choose_target_vacancy_mask_for_horizontal_capacity(
                         ]
 
                         for (
-                            used_prev_src,
+                            _used_prev_src,
                             used_src_here,
-                            used_prev_vac,
+                            _used_prev_vac,
                             used_vac_here,
                             match_gain,
                         ) in transitions:

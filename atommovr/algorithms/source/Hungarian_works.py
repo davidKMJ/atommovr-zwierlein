@@ -5,7 +5,6 @@ from scipy.optimize import linear_sum_assignment
 from scipy.sparse import csr_matrix
 
 from atommovr.algorithms.Algorithm_class import Algorithm
-from atommovr.utils.AtomArray import AtomArray
 from atommovr.utils.core import random_loading, generate_middle_fifty, _int_sum, Configurations
 from atommovr.utils.move_utils import (
     Move,

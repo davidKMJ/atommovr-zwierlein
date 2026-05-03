@@ -3,7 +3,7 @@ import copy
 import numpy as np
 import hashlib
 from numpy.typing import NDArray
-from typing import Tuple, Literal, Any
+from typing import Tuple
 
 from atommovr.utils.Move import Move
 from atommovr.utils.AtomArray import AtomArray
@@ -1267,24 +1267,9 @@ def compact(array) -> list[list[Move]]:
         left_edge_mask_by_row[row] = left_edge_mask
         right_edge_mask_by_row[row] = right_edge_mask
 
-    history = []
     while True:
         signature: bytes = _compact_state_signature(arr1.matrix)
         if signature in seen_signatures:
-            # print("=== BCv2 compact debug ===")
-            # print("compact file:", __file__)
-            # print("first line no:",compact.__code__.co_firstlineno)
-            # print("matrix shape/dtype:", array.matrix.shape, array.matrix.dtype)
-            # print("target shape/dtype:", array.target.shape, array.target.dtype)
-            # print("matrix stable digest:", stable_digest(array.matrix))
-            # print("target stable digest:", stable_digest(array.target))
-            # print("matrix:", array.matrix[:, :, 0].astype(int))
-            # print("target:", array.target[:, :, 0].astype(int))
-            # print("repeated matrix:", arr1.matrix[:, :, 0].astype(int))
-            # print("repeated matrix shape/dtype:", arr1.matrix.shape, arr1.matrix.dtype)
-            # print("repeated matrix stable digest:", stable_digest(arr1.matrix))
-            # print(history)
-            # print("same_as_entry:", np.array_equal(array.matrix, arr1.matrix))
             raise RuntimeError(
                 "compact() re-entered a previously seen state."
                 "This indicates a horizontal compaction cycle."

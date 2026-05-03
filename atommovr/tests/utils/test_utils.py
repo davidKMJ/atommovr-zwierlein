@@ -104,7 +104,7 @@ class TestMove:
                               [3, 2, 2, 0]])
     def test_move_raises_on_greater_than_one_displacement(self, from_row, from_col, to_row, to_col):
         with pytest.raises(ValueError):
-            move = Move(from_row, from_col, to_row, to_col)
+            _ = Move(from_row, from_col, to_row, to_col)
 
 class TestMoveType:
     def test_enum_values(self):

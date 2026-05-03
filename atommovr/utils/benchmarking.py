@@ -15,7 +15,7 @@ from atommovr.utils.core import (
     CONFIGURATION_PLOT_LABELS,
 )
 from atommovr.utils.AtomArray import AtomArray
-from atommovr.algorithms.Algorithm_class import Algorithm, get_effective_target_grid
+from atommovr.algorithms.Algorithm_class import Algorithm
 
 
 def evaluate_moves(array: AtomArray, move_list: list):

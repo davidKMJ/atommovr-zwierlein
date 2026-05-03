@@ -2030,7 +2030,7 @@ class TestBCV2_RANDOM_END_TO_END:
                 final_matrix, master_moves, success_flag = bc_new.bcv2(arr, do_ejection=False)
             except UnboundLocalError:
                 print(f'index is {trial_index}')
-                raise UnboundLocalError
+                raise
 
             replay_arr: AtomArray = _make_atom_array(matrix_2d, target_2d)
             try:

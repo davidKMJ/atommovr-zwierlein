@@ -200,9 +200,11 @@ def timed(
                 name=timing_label,
                 samples=[elapsed],
             )
-            setattr(wrapper, "_last_timing_record", record)
+            # setattr(wrapper, "_last_timing_record", record)
+            wrapper._last_timing_record = record
             logger(f"[timed] {timing_label}: {_format_seconds(elapsed)}")
             return result
+        wrapper._last_timing_record : TimingRecord | None = None
 
         return cast(Callable[P, R], wrapper)
 
@@ -279,7 +281,8 @@ def benchmarked(
                 samples.append(time.perf_counter() - start)
 
             record: TimingRecord = TimingRecord(name=timing_label, samples=samples)
-            setattr(wrapper, "_last_timing_record", record)
+            # setattr(wrapper, "_last_timing_record", record)
+            wrapper._last_timing_record = record
 
             logger(
                 "[benchmarked] "
@@ -290,6 +293,7 @@ def benchmarked(
                 f"n={record.count}"
             )
             return result
+        wrapper._last_timing_record: TimingRecord | None = None
 
         return cast(Callable[P, R], wrapper)
 
@@ -352,13 +356,15 @@ def profiled(
             buffer: io.StringIO = io.StringIO()
             stats: pstats.Stats = pstats.Stats(profiler, stream=buffer).sort_stats(sort_by)
             stats.print_stats(lines)
-            setattr(wrapper, "_last_cprofile_text", buffer.getvalue())
+            # setattr(wrapper, "_last_cprofile_text", buffer.getvalue())
+            wrapper._last_cprofile_text = buffer.getvalue()
 
             logger(
                 f"[profiled] {func.__qualname__} "
                 f"(sorted by {sort_by}, top {lines} lines)\n{buffer.getvalue()}"
             )
             return result
+        wrapper._last_cprofile_text: str | None = None
 
         return cast(Callable[P, R], wrapper)
 
@@ -415,10 +421,12 @@ def line_profiled(
 
             buffer: io.StringIO = io.StringIO()
             profiler.print_stats(stream=buffer)
-            setattr(wrapper, "_last_line_profile_text", buffer.getvalue())
+            wrapper._last_line_profile_text = buffer.getvalue()
+            # setattr(wrapper, "_last_line_profile_text", buffer.getvalue())
 
             logger(f"[line_profiled] {func.__qualname__}\n{buffer.getvalue()}")
             return result
+        wrapper._last_line_profile_text: str | None = None
 
         return cast(Callable[P, R], wrapper)
 

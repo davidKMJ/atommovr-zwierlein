@@ -3,7 +3,6 @@ import itertools
 import numpy as np
 import pytest
 
-import atommovr.utils as movr
 from atommovr.utils.Move import Move
 from atommovr.utils.move_utils import move_atoms_noiseless
 from atommovr.algorithms.source.bc_controller_helpers import (
@@ -18,7 +17,6 @@ from atommovr.algorithms.source.bc_controller_helpers import (
     ensure_cut_capacity,
     move_across_rows,
     _plan_horizontal_rounds_to_target,
-    compress_move_rounds_conservative,
 )
 
 import atommovr.algorithms.source.bc_controller_helpers as helpers
@@ -458,6 +456,42 @@ class TestSOURCE_SUPPLY_AT_BOUNDARY:
 
         with pytest.raises(ValueError):
             source_supply_at_boundary(state_2d, 0)
+
+    @pytest.mark.parametrize("moves", [
+        [[Move(2, 2, 2, 1)], [Move(2, 3, 2, 2)]],
+        [[Move(2, 2, 2, 1)], [Move(0, 2, 0, 1)]],
+        [[Move(2, 2, 2, 1)], [Move(0, 2, 0, 1)],[Move(2, 3, 2, 2)]],
+        [[Move(2, 2, 2, 1)], [Move(0, 2, 0, 1), Move(2, 3, 2, 2)]],
+        [[Move(2, 2, 2, 1), Move(2, 3, 2, 2)], [Move(0, 2, 0, 1)]],
+        [[Move(1, 1, 0, 1)], [Move(2, 4, 1, 4)]],
+        [[Move(1, 1, 0, 1)], [Move(1, 3, 0, 3)], [Move(2, 3, 1, 3)]],
+        [[Move(1, 1, 0, 1)], [Move(2, 3, 1, 3), Move(1, 3, 0, 3)]],
+        [[Move(1, 1, 0, 1)], [Move(1, 3, 0, 3), Move(2, 3, 1, 3)]],
+        [[Move(2, 3, 1, 3), Move(1, 3, 0, 3)], [Move(1, 1, 0, 1)]],
+                                       ])
+    def test_mergeable_moves_are_merged_into_single_round(self, moves):
+        state: np.ndarray = _make_state_from_rows(
+            [1, 0, 1, 0, 0],
+            [1, 1, 1, 1, 0],
+            [0, 0, 1, 1, 1],
+        )
+        com_moves = compress_move_rounds_conservative(state, moves)
+        assert len(com_moves) == 1
+    
+    @pytest.mark.parametrize("moves", [
+        [[Move(1, 1, 0, 1)], [Move(2, 3, 1, 3)]],
+        [[Move(0, 2, 0, 1)], [Move(2, 4, 1, 4)]],
+        [[Move(1, 1, 0, 1)], [Move(2, 3, 1, 3)], [Move(1, 3, 0, 3)]],
+        [[Move(2, 2, 2, 1)], [Move(1, 3, 1, 4)]],
+                                       ])
+    def test_nonmergeable_moves_are_not_merged(self, moves):
+        state: np.ndarray = _make_state_from_rows(
+            [1, 0, 1, 0, 0],
+            [1, 1, 1, 1, 0],
+            [0, 0, 1, 1, 1],
+        )
+        com_moves = compress_move_rounds_conservative(state, moves)
+        assert len(com_moves) == len(moves)
 
 
 class TestDIRECT_CUT_CAPACITY:
@@ -4158,41 +4192,3 @@ class TestMOVE_ACROSS_ROWS_WITH_STUBS:
         assert calls["cut"] == 1
         assert transferred == 0
         assert status["last_bottleneck"] == "cut_capacity"
-
-
-class TestCOMPRESS_MOVE_ROUNDS_CONSERVATIVE:
-    @pytest.mark.parametrize("moves", [
-        [[Move(2, 2, 2, 1)], [Move(2, 3, 2, 2)]],
-        [[Move(2, 2, 2, 1)], [Move(0, 2, 0, 1)]],
-        [[Move(2, 2, 2, 1)], [Move(0, 2, 0, 1)],[Move(2, 3, 2, 2)]],
-        [[Move(2, 2, 2, 1)], [Move(0, 2, 0, 1), Move(2, 3, 2, 2)]],
-        [[Move(2, 2, 2, 1), Move(2, 3, 2, 2)], [Move(0, 2, 0, 1)]],
-        [[Move(1, 1, 0, 1)], [Move(2, 4, 1, 4)]],
-        [[Move(1, 1, 0, 1)], [Move(1, 3, 0, 3)], [Move(2, 3, 1, 3)]],
-        [[Move(1, 1, 0, 1)], [Move(2, 3, 1, 3), Move(1, 3, 0, 3)]],
-        [[Move(1, 1, 0, 1)], [Move(1, 3, 0, 3), Move(2, 3, 1, 3)]],
-        [[Move(2, 3, 1, 3), Move(1, 3, 0, 3)], [Move(1, 1, 0, 1)]],
-                                       ])
-    def test_mergeable_moves_are_merged_into_single_round(self, moves):
-        state: np.ndarray = _make_state_from_rows(
-            [1, 0, 1, 0, 0],
-            [1, 1, 1, 1, 0],
-            [0, 0, 1, 1, 1],
-        )
-        com_moves = compress_move_rounds_conservative(state, moves)
-        assert len(com_moves) == 1
-    
-    @pytest.mark.parametrize("moves", [
-        [[Move(1, 1, 0, 1)], [Move(2, 3, 1, 3)]],
-        [[Move(0, 2, 0, 1)], [Move(2, 4, 1, 4)]],
-        [[Move(1, 1, 0, 1)], [Move(2, 3, 1, 3)], [Move(1, 3, 0, 3)]],
-        [[Move(2, 2, 2, 1)], [Move(1, 3, 1, 4)]],
-                                       ])
-    def test_nonmergeable_moves_are_not_merged(self, moves):
-        state: np.ndarray = _make_state_from_rows(
-            [1, 0, 1, 0, 0],
-            [1, 1, 1, 1, 0],
-            [0, 0, 1, 1, 1],
-        )
-        com_moves = compress_move_rounds_conservative(state, moves)
-        assert len(com_moves) == len(moves)
