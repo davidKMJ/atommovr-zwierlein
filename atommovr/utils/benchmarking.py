@@ -3,7 +3,6 @@
 import math
 import numpy as np
 import xarray as xr
-from typing import Union
 import matplotlib.pyplot as plt
 
 from atommovr.utils.errormodels import ZeroNoise, ErrorModel
@@ -359,7 +358,7 @@ class Benchmarking:
         n_shots: int = 100,
         n_species: int = 1,
         check_sufficient_atoms: bool = True,
-    ):
+    ) -> None:
         """Initialize benchmarking sweeps over algorithms, targets, and system sizes.
 
         Parameters
@@ -438,7 +437,7 @@ class Benchmarking:
                 "`target_configs` must be a list of Configuration objects or an np.ndarray."
             )
 
-    def save(self, savename):
+    def save(self, savename: str) -> None:
         """Persist benchmarking results to ``data/<savename>.nc``.
 
         Parameters
@@ -474,7 +473,7 @@ class Benchmarking:
         serializable_results.to_netcdf(f"data/{savename}.nc")
         print(f"Benchmarking object saved to `data/{savename}.nc`")
 
-    def load(self, loadname):
+    def load(self, loadname: str) -> None:
         """Load benchmarking results from ``data/<loadname>.nc`` into the object.
 
         Parameters
@@ -487,7 +486,7 @@ class Benchmarking:
         self.benchmarking_results = xr.open_dataset(f"data/{loadname}.nc")
         print(f"Data from `data/{loadname}.nc` loaded to `self.benchmarking_results`.")
 
-    def load_params_from_dataset(self, dataset: xr.Dataset):
+    def load_params_from_dataset(self, dataset: xr.Dataset) -> None:
         """Import sweep parameters from an existing benchmarking dataset.
 
         Parameters
@@ -514,7 +513,7 @@ class Benchmarking:
             self.rounds_list.append(int(round))
         self.n_shots = len(dataset["filling fraction"].values[0][0][0][0][0][0])
 
-    def set_observables(self, observables: list):
+    def set_observables(self, observables: list) -> None:
         """Set which observables should be plotted in downstream figures.
 
         Parameters
@@ -524,7 +523,7 @@ class Benchmarking:
         """
         self.figure_output.y_axis_variables = observables
 
-    def get_result_array_dims(self):
+    def get_result_array_dims(self) -> None:
         """Update bookkeeping for result array dimensions based on current sweeps."""
         self.n_algos = len(self.algos)
         if self.istargetlist:
@@ -552,7 +551,7 @@ class Benchmarking:
         self.n_parsets = len(self.phys_params_list)
         self.n_rounds = len(self.rounds_list)
 
-    def run(self, do_ejection: bool = False):
+    def run(self, do_ejection: bool = False) -> None:
         """Execute benchmarking sweeps and populate ``self.benchmarking_results``.
 
         Parameters
@@ -867,7 +866,7 @@ class Benchmarking:
             float(np.mean(sufficient_flags)),
         )
 
-    def plot_results(self, save=False, savename=None):
+    def plot_results(self, save: bool = False, savename: str | None = None) -> None:
         """Dispatch plotting based on ``figure_output.figure_type``.
 
         Parameters
