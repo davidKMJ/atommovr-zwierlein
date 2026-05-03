@@ -765,7 +765,9 @@ class Benchmarking:
         if self.istargetlist:
             if pattern != Configurations.RANDOM:
                 self.tweezer_array.generate_target(
-                    pattern, occupation_prob=self.tweezer_array.params.loading_prob
+                    pattern, 
+                    occupation_prob=self.tweezer_array.params.loading_prob,
+                    middle_size = self.tweezer_array.params.middle_size,
                 )
 
         for shot in range(self.n_shots):
