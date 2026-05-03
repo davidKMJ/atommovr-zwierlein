@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 
 from atommovr.utils.errormodels import ZeroNoise, ErrorModel
 from atommovr.utils.core import (
+    _count_wrong_places,
     generate_random_target_configs,
     generate_random_init_configs,
     PhysicalParams,
@@ -349,7 +350,7 @@ class Benchmarking:
     def __init__(
         self,
         algos: list[Algorithm] | None = None,
-        target_configs: Union[list, np.ndarray, None] = None,
+        target_configs: list[Configurations] | None = None,
         error_models_list: list[ErrorModel] | None = None,
         phys_params_list: list[PhysicalParams] | None = None,
         sys_sizes: list[int] | None = None,
@@ -366,8 +367,7 @@ class Benchmarking:
         algos : list of Algorithm, optional
             Algorithms to benchmark.
         target_configs : list or ndarray, optional
-            Target configurations as ``Configurations`` enums or explicit arrays. If an
-            ndarray, shape must be ``(len(sys_sizes), n_targets)``.
+            Target configurations as ``Configurations`` enums.
         error_models_list : list, optional
             Error models to evaluate.
         phys_params_list : list, optional
@@ -845,35 +845,10 @@ class Benchmarking:
             )
 
             # Identify wrong places (atoms that are not in the target configuration)
-            if do_ejection:
-                wrong_places.append(
-                    int(
-                        np.sum(
-                            np.abs(
-                                self.tweezer_array.matrix - self.tweezer_array.target
-                            )
-                        )
-                    )
-                )
-            else:
-                start_row, end_row, start_col, end_col = get_effective_target_grid(
-                    self.tweezer_array.target
-                )
-                wrong_places.append(
-                    int(
-                        np.sum(
-                            np.abs(
-                                self.tweezer_array.matrix[
-                                    start_row : end_row + 1, start_col : end_col + 1
-                                ]
-                                - self.tweezer_array.target[
-                                    start_row : end_row + 1, start_col : end_col + 1
-                                ]
-                            )
-                        )
-                    )
-                )
-            # Count atoms in array
+            wrong_places.append(_count_wrong_places(self.tweezer_array.matrix,
+                                                    self.tweezer_array.target,
+                                                    do_ejection))
+
             atoms_in_arrays.append(int(np.sum(self.tweezer_array.matrix)))
             atoms_in_targets.append(int(np.sum(self.tweezer_array.target)))
 

@@ -154,6 +154,22 @@ class ArrayGeometry(IntEnum):
 # Functions #
 #############
 
+def _count_wrong_places(matrix: np.ndarray, target: np.ndarray, do_ejection: bool) -> int:
+    """Counts the number of unfilled target sites in an atom array."""
+    if do_ejection:
+        return _int_sum(np.count_nonzero(matrix != target))
+    required = (target == 1)
+    return _int_sum(np.count_nonzero(matrix[required] != 1))
+
+def _int_sum(x: np.ndarray) -> int:
+    """Return ``int(np.sum(x))`` with a signed accumulation dtype.
+
+    Notes
+    -----
+    This avoids unsigned underflow/overflow bugs when subtracting counts that come
+    from uint-typed occupancy arrays (e.g., ``np.uint8``).
+    """
+    return int(np.sum(x, dtype=np.int64))
 
 def _coerce_rng(rng: np.random.Generator | None) -> np.random.Generator:
     """Return a numpy Generator, creating a fresh one if None."""

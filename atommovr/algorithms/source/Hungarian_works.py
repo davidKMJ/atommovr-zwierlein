@@ -5,7 +5,8 @@ from scipy.optimize import linear_sum_assignment
 from scipy.sparse import csr_matrix
 
 from atommovr.algorithms.Algorithm_class import Algorithm
-from atommovr.utils.core import random_loading, generate_middle_fifty, Configurations
+from atommovr.utils.AtomArray import AtomArray
+from atommovr.utils.core import random_loading, generate_middle_fifty, _int_sum, Configurations
 from atommovr.utils.move_utils import (
     Move,
     move_atoms,
@@ -17,6 +18,54 @@ from atommovr.algorithms.source.ejection import ejection
 from atommovr.algorithms.source.scaling_lower_bound import make_cost_matrix_square
 from atommovr.algorithms.source.PPSU_weight_matching import bttl_threshold
 
+def _assert_unique_round_sources(move_round: list[Move]) -> None:
+    seen_sources: set[tuple[int, int]] = set()
+    seen_moves: set[tuple[int, int, int, int]] = set()
+
+    for move in move_round:
+        src = (int(move.from_row), int(move.from_col))
+        key = (
+            int(move.from_row),
+            int(move.from_col),
+            int(move.to_row),
+            int(move.to_col),
+        )
+
+        if src in seen_sources:
+            raise RuntimeError(f"Duplicate source in move round: {move_round}")
+        if key in seen_moves:
+            raise RuntimeError(f"Duplicate move in move round: {move_round}")
+
+        seen_sources.add(src)
+        seen_moves.add(key)
+
+def _dedup_exact_moves(move_round: list[Move]) -> list[Move]:
+    """Remove exact duplicate moves while preserving first occurrence order."""
+    deduped: list[Move] = []
+    seen: set[tuple[int, int, int, int]] = set()
+
+    for move in move_round:
+        key = (
+            int(move.from_row),
+            int(move.from_col),
+            int(move.to_row),
+            int(move.to_col),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(move)
+
+    return deduped
+
+def _assert_unique_sources(move_round: list[Move]) -> None:
+    """Enforce one source site per round."""
+    seen: set[tuple[int, int]] = set()
+    for move in move_round:
+        src = (int(move.from_row), int(move.from_col))
+        if src in seen:
+            raise RuntimeError(f"Duplicate source in move round: {move_round}")
+        seen.add(src)
 
 def parallel_LBAP_algorithm_works(
     atom_arrays: np.ndarray,
@@ -158,8 +207,6 @@ def Hungarian_algorithm_works_fast(
     tuple[np.ndarray, list, bool]
         Final configuration, move list, and success flag.
     """
-    from atommovr.algorithms.Algorithm_class import Algorithm
-    from atommovr.algorithms.source.ejection import ejection
 
     move_set: list = []
     matrix: np.ndarray = atom_arrays.copy()
@@ -264,6 +311,9 @@ def parallel_Hungarian_algorithm_works(
     if final_size is None:
         final_size = []
 
+    if _int_sum(atom_arrays) < _int_sum(target_config):
+        return atom_arrays, [], False
+
     while (not complete_flag) and (round_count < round_lim):
         N_independent_moves_path = []
         # 1. Generate the assignments
@@ -293,6 +343,8 @@ def parallel_Hungarian_algorithm_works(
             complete_flag = True
             Hungarian_success_flag = True
         round_count += 1
+        if round_count == round_lim:
+            raise RuntimeError(f"Parallel Hungarian algorithm hit round count limit. Consider increasing round count limit (currently {round_lim})")
 
     # 4. Eject to certain geoemetry
     if do_ejection:
@@ -840,6 +892,9 @@ def transform_paths_into_moves_fast(
             grouped_moves: list[list[Move]] = regroup_parallel_moves_fast(
                 matrix, moves_in_scan
             )
+            grouped_moves = [_dedup_exact_moves(round_) for round_ in grouped_moves]
+            for round_ in grouped_moves:
+                _assert_unique_sources(round_)
             parallel_move_set.extend(grouped_moves)
 
             for moves in grouped_moves:
