@@ -185,7 +185,7 @@ class BCv2(Algorithm):
             atom_array.target, np.multiply(atom_array.matrix, atom_array.target)
         ):
             return atom_array, [], True
-        return bcv2(atom_array, do_ejection, self.batch_fraction)
+        return bcv2(atom_array, do_ejection, self.batch_fractions)
 
 
 # Balance and Compact
