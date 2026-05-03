@@ -48,7 +48,7 @@ class ParallelHungarian(Algorithm):
                 f"Single-species algorithm cannot process atom array with {atom_array.n_species} species."
             )
         if round_lim == 0:
-            round_lim = int(min(np.sum(atom_array.target),15))
+            round_lim = int(max(np.sum(atom_array.target), 15))
         # If the atom array does not have enough atoms, return the same array, empty move list, and False for success flag.
         if np.sum(atom_array.matrix) < np.sum(atom_array.target):
             return atom_array, [], False
