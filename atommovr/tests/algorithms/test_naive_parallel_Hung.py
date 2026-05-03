@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import numpy as np
-
 from atommovr.algorithms.source.naive_parallel_Hung import (
     find_smallest_l,
     define_current_and_target_naive_par,
@@ -37,14 +36,14 @@ class TestFindSmallestL:
         target[4, 5] = 1
         target[5, 4] = 1
 
-        min_length = find_smallest_l(matrix, target)
-        assert min_length > 0
+        smallest_l = find_smallest_l(matrix, target)
+        assert smallest_l > 0
         # Check that the resulting square can contain the atoms
         n = len(matrix)
         center = n / 2
         delta = n % 2
-        left_bound = int(center - min_length + delta)
-        right_bound = int(center + min_length)
+        left_bound = int(center - smallest_l + delta)
+        right_bound = int(center + smallest_l)
         n_in_square = np.sum(matrix[left_bound:right_bound, left_bound:right_bound])
         assert n_in_square >= np.sum(target)
 
@@ -63,8 +62,8 @@ class TestFindSmallestL:
         target[3, 3] = 1
         target[3, 4] = 1
 
-        min_length = find_smallest_l(matrix, target)
-        assert min_length >= 1
+        smallest_l = find_smallest_l(matrix, target)
+        assert smallest_l >= 1
 
 
 class TestDefineCurrentAndTargetNaivePar:
@@ -202,12 +201,12 @@ class TestNeighbors8NaivePar:
 
     def test_returns_8_neighbors_for_center(self) -> None:
         """Center point should have 8 neighbors."""
-        neighbors = neighbors_8_naive_par(3, 3, 8)
+        neighbors = neighbors_8_naive_par(3, 3, 8, 8)
         assert len(neighbors) == 8
 
     def test_returns_3_neighbors_for_corner(self) -> None:
         """Corner point should have 3 neighbors."""
-        neighbors = neighbors_8_naive_par(0, 0, 8)
+        neighbors = neighbors_8_naive_par(0, 0, 8, 8)
         assert len(neighbors) == 3
         assert (0, 1) in neighbors
         assert (1, 0) in neighbors
@@ -215,7 +214,7 @@ class TestNeighbors8NaivePar:
 
     def test_respects_grid_bounds(self) -> None:
         """Neighbors should not exceed grid boundaries."""
-        neighbors = neighbors_8_naive_par(0, 0, 5)
+        neighbors = neighbors_8_naive_par(0, 0, 5, 5)
         for r, c in neighbors:
             assert 0 <= r < 5
             assert 0 <= c < 5
@@ -410,7 +409,7 @@ class TestNaiveParHung:
         aa.target[4, 4, 0] = 1
         aa.target[3, 3, 1] = 1
 
-        result_aa, moves, _ = naive_par_Hung(aa, do_ejection=False, round_lim=10)
+        _result_aa, moves, _ = naive_par_Hung(aa, do_ejection=False, round_lim=10)
 
         for round_idx, round_moves in enumerate(moves):
             assert isinstance(round_moves, list), f"Round {round_idx} is not a list"

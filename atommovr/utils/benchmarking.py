@@ -823,7 +823,6 @@ class Benchmarking:
                     self.tweezer_array.matrix,
                     self.tweezer_array.target,
                     do_ejection=do_ejection,
-                    n_species=self.tweezer_array.n_species,
                 )
                 if success_flag == 1:
                     break
@@ -843,20 +842,33 @@ class Benchmarking:
                 )
             )
 
-            # Identify wrong places (atoms that are not in the target configuration)
+            # Identify wrong places
             wrong_places.append(
                 _count_wrong_places(
-                    self.tweezer_array.matrix, self.tweezer_array.target, do_ejection
+                    self.tweezer_array.matrix,
+                    self.tweezer_array.target,
+                    do_ejection,
                 )
             )
 
+            # Count atoms in array
             atoms_in_arrays.append(int(np.sum(self.tweezer_array.matrix)))
             atoms_in_targets.append(int(np.sum(self.tweezer_array.target)))
 
-            if np.sum(initial_config) < np.sum(self.tweezer_array.target):
-                sufficient_flags.append(False)
+            if self.tweezer_array.n_species == 1:
+                if np.sum(initial_config) < np.sum(self.tweezer_array.target):
+                    sufficient_flags.append(False)
+                else:
+                    sufficient_flags.append(True)
             else:
-                sufficient_flags.append(True)
+                if np.sum(initial_config[:, :, 0]) < np.sum(
+                    self.tweezer_array.target[:, :, 0]
+                ) or np.sum(initial_config[:, :, 1]) < np.sum(
+                    self.tweezer_array.target[:, :, 1]
+                ):
+                    sufficient_flags.append(False)
+                else:
+                    sufficient_flags.append(True)
 
         return (
             float(np.mean(success_flags)),

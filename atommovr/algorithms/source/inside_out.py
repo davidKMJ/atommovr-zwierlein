@@ -4,6 +4,7 @@ from typing import Callable
 
 from atommovr.utils.AtomArray import AtomArray
 from atommovr.utils.Move import Move
+from atommovr.algorithms.source.Hungarian_works import regroup_parallel_moves_fast
 from atommovr.algorithms.source.inside_out_utils import (
     is_site_correct,
     clean_empty_moves,
@@ -22,7 +23,6 @@ from atommovr.algorithms.source.inside_out_utils import (
     categ_2_move_exe,
     push_out_obstacles,
     diff_species_ok,
-    regroup_parallel_moves,
     gen_dual_assign_new,
     generate_decomposed_move_list,
 )
@@ -36,21 +36,18 @@ def inside_out_algorithm(rbcs_arrays: AtomArray, round_lim: int = 50):
     move_list = []
     move_list_layer = []
 
-    if not check_atom_enough(rbcs_arrays):  # == False: linting error
+    if not check_atom_enough(rbcs_arrays):
         return rbcs_arrays, [], False
 
-    layer_num = 1  # The index control which layer we are rearranging
+    layer_num = 1
     iteration = 0
 
-    # Start deal with the n-th layer rearrangement
-    while (
-        not rearrangement_complete(arrays) and iteration < round_lim
-    ):  # == False linting error
+    while not rearrangement_complete(arrays) and iteration < round_lim:
         arrays_save = copy.deepcopy(arrays)
+
         if layer_complete(layer_num, arrays, is_site_correct(arrays)):
             move_list.extend(move_list_layer)
             move_list_layer = []
-            # If the rearrangement is not completed, we move on next outer layer
             if not rearrangement_complete(arrays):
                 layer_num += 1
         else:
@@ -63,12 +60,9 @@ def inside_out_algorithm(rbcs_arrays: AtomArray, round_lim: int = 50):
                     arrays, layer_num, get_stuck_flag=False
                 )
 
-            if moves is None:  # == None: linting error
-                return rbcs_arrays, None, False
             move_list_layer.extend(moves)
             iteration += 1
 
-            # Check if the rearrangement disturbs inner (previous) layer
             for check_layer in range(layer_num, 0, -1):
                 if not layer_complete(check_layer, arrays, is_site_correct(arrays)):
                     layer_num = check_layer
@@ -106,29 +100,28 @@ def layer_complete(
     A layer is 'complete' if, along the perimeter of this layer,
     the array matches the target for both Rb and Cs.
     """
-    # Extract Rb & Cs layers plus their target arrays
-    Rb_arrays = arrays.matrix[:, :, 0]
-    Rb_target = arrays.target_Rb
-    Cs_arrays = arrays.matrix[:, :, 1]
-    Cs_target = arrays.target_Cs
+    n_rows, n_cols = arrays.matrix.shape[:2]
 
-    # Define the boundary for this layer
-    n = Rb_arrays.shape[0]
-    top, left, bottom, right = def_boundary(layer_factor - 1, n)
+    # Keep existing boundary convention, but filter to valid coordinates later.
+    top, left, bottom, right = def_boundary(layer_factor - 1, n_rows, n_cols)
 
-    # Boundary check
-    if top < 0 or left < 0 or bottom >= n or right >= n:
+    # If the nominal layer is fully outside the array, treat as incomplete.
+    if bottom < 0 or right < 0 or top >= n_rows or left >= n_cols:
         return False
 
-    # If layer_factor == 0, it's just the center cell
-    if top == bottom and left == right:
-        return bool(
-            Rb_arrays[top, left] == Rb_target[top, left]
-            and Cs_arrays[top, left] == Cs_target[top, left]
-        )
+    # Filter perimeter coordinates to those actually inside the rectangular array.
+    valid_coords = [
+        (r, c)
+        for (r, c) in perimeter_coords(top, left, bottom, right)
+        if 0 <= r < n_rows and 0 <= c < n_cols
+    ]
 
-    # Check perimeter cells; if any mismatch, layer isn't complete
-    for r, c in perimeter_coords(top, left, bottom, right):
+    # If this layer contributes no valid cells inside the current rectangular array,
+    # treat it as complete so the algorithm can move inward/outward without crashing.
+    if len(valid_coords) == 0:
+        return True
+
+    for r, c in valid_coords:
         if not is_site_correct(r, c):
             return False
 
@@ -141,14 +134,12 @@ def inside_out_layer_push(
     arrays = copy.deepcopy(rbcs_arrays)
     move_list = []
 
-    # Push out all misplace atoms
     arrays, push_out_moves = push_out_misplaced_atoms(arrays, layer_factor)
     move_list.extend(push_out_moves)
 
-    if not check_atom_enough(arrays):  # == False: linting error
-        return arrays, None
+    if not check_atom_enough(arrays):
+        return arrays, []
 
-    # Check if the process get stuck
     while True:
         N_independent_path_move_in, categ_2_pair_in = generate_path_inside_out_new(
             arrays, layer_factor, "in"
@@ -156,6 +147,7 @@ def inside_out_layer_push(
 
         if len(N_independent_path_move_in) == 0:
             break
+
         if get_stuck_flag:
             for move in N_independent_path_move_in[0]:
                 arrays.move_atoms([move])
@@ -180,10 +172,12 @@ def rearrangement_complete(arrays: AtomArray) -> bool:
     It should call the layer_complete function (every layer complete->rearrangement complete)
     """
     Rb_complete = np.array_equal(
-        np.multiply(arrays.matrix[:, :, 0], arrays.target_Rb), arrays.target_Rb
+        np.multiply(arrays.matrix[:, :, 0], arrays.target[:, :, 0]),
+        arrays.target[:, :, 0],
     )
     Cs_complete = np.array_equal(
-        np.multiply(arrays.matrix[:, :, 1], arrays.target_Cs), arrays.target_Cs
+        np.multiply(arrays.matrix[:, :, 1], arrays.target[:, :, 1]),
+        arrays.target[:, :, 1],
     )
     return bool(Rb_complete and Cs_complete)
 
@@ -244,7 +238,7 @@ def crude_push_atoms(
             non_parallel_push_moves_dict[(push_dir[0], push_dir[1])].append(chain_list)
 
     if len(push_moves_dict[(1, 0)]) > 0:
-        horiz_AOD_cmds, vert_AOD_cmds, parallel_success_flag = generate_AOD_cmds(
+        _horiz_AOD_cmds, _vert_AOD_cmds, parallel_success_flag = generate_AOD_cmds(
             op_matrix, push_moves_dict[(1, 0)]
         )
         if parallel_success_flag:
@@ -254,7 +248,7 @@ def crude_push_atoms(
                 push_moves.append(push_line)
 
     if len(push_moves_dict[(0, 1)]) > 0:
-        horiz_AOD_cmds, vert_AOD_cmds, parallel_success_flag = generate_AOD_cmds(
+        _horiz_AOD_cmds, _vert_AOD_cmds, parallel_success_flag = generate_AOD_cmds(
             op_matrix, push_moves_dict[(0, 1)]
         )
         if parallel_success_flag:
@@ -264,7 +258,7 @@ def crude_push_atoms(
                 push_moves.append(push_line)
 
     if len(push_moves_dict[(-1, 0)]) > 0:
-        horiz_AOD_cmds, vert_AOD_cmds, parallel_success_flag = generate_AOD_cmds(
+        _horiz_AOD_cmds, _vert_AOD_cmds, parallel_success_flag = generate_AOD_cmds(
             op_matrix, push_moves_dict[(-1, 0)]
         )
         if parallel_success_flag:
@@ -274,7 +268,7 @@ def crude_push_atoms(
                 push_moves.append(push_line)
 
     if len(push_moves_dict[(0, -1)]) > 0:
-        horiz_AOD_cmds, vert_AOD_cmds, parallel_success_flag = generate_AOD_cmds(
+        _horiz_AOD_cmds, _vert_AOD_cmds, parallel_success_flag = generate_AOD_cmds(
             op_matrix, push_moves_dict[(0, -1)]
         )
         if parallel_success_flag:
@@ -376,8 +370,8 @@ def transform_paths_into_moves(
 
         # 3) Parallelize moves in this round
         if len(moves_in_scan) > 0:
-            matrix = arrays.matrix[:, :, 0] + arrays.matrix[:, :, 1]
-            moves_in_scan = regroup_parallel_moves(matrix, moves_in_scan)
+            matrix = np.asarray(arrays.matrix[:, :, 0] + arrays.matrix[:, :, 1])
+            moves_in_scan = regroup_parallel_moves_fast(matrix, moves_in_scan)
             # 2.1.3 Implement the moves
             parallel_moves.extend(moves_in_scan)
             for moves in moves_in_scan:
@@ -445,8 +439,8 @@ def handle_categ_2_paths(
 
 
 def find_push_dir(arrays, layer_factor, obs_coord):
-    n = arrays.matrix.shape[0]
-    top, left, bottom, right = def_boundary(layer_factor - 1, n)
+    n_rows, n_cols = arrays.matrix.shape[:2]
+    top, left, bottom, right = def_boundary(layer_factor - 1, n_rows, n_cols)
     for c in range(left, right + 1):
         if (top, c) == obs_coord:
             return (-1, 0)

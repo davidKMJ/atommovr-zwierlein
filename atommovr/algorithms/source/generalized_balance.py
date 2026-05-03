@@ -8,6 +8,36 @@ from atommovr.utils.move_utils import move_atoms
 from atommovr.algorithms.source.ejection import ejection
 
 
+def _normalize_final_size(matrix, final_size):
+    """Return row and column bounds in the form
+    (row_min, row_max, col_min, col_max).
+    """
+    n_rows, n_cols = matrix.shape
+
+    if final_size is None or len(final_size) == 0:
+        return 0, n_rows - 1, 0, n_cols - 1
+
+    if len(final_size) != 4:
+        raise ValueError(
+            f"final_size must have length 4: "
+            f"[row_min, row_max, col_min, col_max], got {final_size}"
+        )
+
+    row_min, row_max, col_min, col_max = final_size
+
+    if not (0 <= row_min <= row_max < n_rows):
+        raise ValueError(
+            f"Invalid row bounds ({row_min}, {row_max}) for matrix shape {matrix.shape}"
+        )
+
+    if not (0 <= col_min <= col_max < n_cols):
+        raise ValueError(
+            f"Invalid col bounds ({col_min}, {col_max}) for matrix shape {matrix.shape}"
+        )
+
+    return row_min, row_max, col_min, col_max
+
+
 def generalized_balance(
     init_config,
     target_config,
@@ -17,39 +47,34 @@ def generalized_balance(
     generalized_balance_success_flag = False
     matrix = copy.deepcopy(init_config)
     move_list = []
+    target_2d = target_config[..., 0] if target_config.ndim == 3 else target_config
 
-    # Counts moves components in the Hungarian algorithm
-    # balance_moves_term = 0 # linting error - unused
-    # ejection_moves_term = 0
-
-    if final_size is None:
-        final_size = [0, len(matrix[0]) - 1, 0, len(matrix) - 1]
-    elif len(final_size) == 0:
-        final_size = [0, len(matrix[0]) - 1, 0, len(matrix) - 1]
-
-    row_min = final_size[0]
-    row_max = final_size[1]
-    col_min = final_size[2]
-    col_max = final_size[3]
+    row_min, row_max, col_min, col_max = _normalize_final_size(matrix, final_size)
 
     balance_config, move_list = row_balance(
-        matrix, target_config, row_min, row_max, col_min, col_max, move_list, 0
+        matrix,
+        target_2d,
+        row_min,
+        row_max,
+        col_min,
+        col_max,
+        move_list,
+        0,
     )
     # balance_moves_term = len(move_list)
     final_config = copy.deepcopy(balance_config)
 
     if do_ejection:
-        eject_moves, final_config = ejection(balance_config, target_config, final_size)
+        eject_moves, final_config = ejection(balance_config, target_2d, final_size)
         move_list.extend(eject_moves)
         # ejection_moves_term = len(eject_moves)
         # Check if the configuration is the same as the target configuration
-        if np.array_equal(final_config, target_config):
+        if np.array_equal(final_config, target_2d):
             generalized_balance_success_flag = True
     else:
         # ejection_moves_term = 0
         # Check if the configuration (inside range of target) the same as the target configuration
-        effective_config = np.multiply(final_config, target_config)
-        if np.array_equal(effective_config, target_config):
+        if np.array_equal(np.multiply(final_config, target_2d), target_2d):
             generalized_balance_success_flag = True
 
     return (
@@ -239,6 +264,7 @@ def down_move(
     move_list,
 ):
     # Initialize the move bound
+    n_rows, n_cols = matrix.shape
     source_row = middle_row
     target_row = middle_row + 1
     normalize_row = 0
@@ -275,7 +301,7 @@ def down_move(
         if (
             sum(matrix[target_row, col_min : col_max + 1])
             == len(matrix[target_row, col_min : col_max + 1])
-            and target_row + stuff < len(matrix)
+            and target_row + stuff + 1 < n_rows
             and excess_atoms > 0
         ):
             for shift in range(stuff, -1, -1):
@@ -507,6 +533,7 @@ def right_move(
     move_list,
 ):
     # Initialize the move bound
+    n_rows, n_cols = matrix.shape
     source_col = middle_col
     target_col = middle_col + 1
     normalize_col = 0
@@ -542,7 +569,7 @@ def right_move(
         if (
             sum(matrix[row_min : row_max + 1, target_col])
             == len(matrix[row_min : row_max + 1, target_col])
-            and target_col + stuff < len(matrix)
+            and target_col + stuff + 1 < n_cols
             and excess_atoms > 0
         ):
             for shift in range(stuff, -1, -1):
