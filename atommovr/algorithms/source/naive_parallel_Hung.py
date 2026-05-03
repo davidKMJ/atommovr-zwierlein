@@ -6,10 +6,10 @@ from scipy.optimize import linear_sum_assignment
 
 from atommovr.utils.Move import Move
 from atommovr.utils.AtomArray import AtomArray
+from atommovr.algorithms.source.Hungarian_works import regroup_parallel_moves_fast
 from atommovr.algorithms.source.inside_out_utils import (
     BFSResult,
     collect_non_conflicting_moves,
-    regroup_parallel_moves,
     same_species_ok,
     process_chain_moves_new,
     generate_decomposed_move_list,
@@ -373,7 +373,7 @@ def transform_paths_into_moves_naive_par(
         # 3) Parallelize moves in this round
         if len(moves_in_scan) > 0:
             matrix = arrays.matrix[:, :, 0] + arrays.matrix[:, :, 1]
-            moves_in_scan = regroup_parallel_moves(matrix, moves_in_scan)
+            moves_in_scan = regroup_parallel_moves_fast(matrix, moves_in_scan)
             # 2.1.3 Implement the moves
             parallel_moves.extend(moves_in_scan)
             for moves in moves_in_scan:

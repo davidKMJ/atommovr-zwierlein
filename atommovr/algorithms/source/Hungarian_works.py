@@ -13,6 +13,7 @@ from atommovr.utils.move_utils import (
     get_move_list_from_AOD_cmds,
     get_AOD_cmds_from_move_list,
 )
+from atommovr.utils.aod_timing import _has_colliding_tones
 from atommovr.algorithms.source.ejection import ejection
 from atommovr.algorithms.source.scaling_lower_bound import make_cost_matrix_square
 from atommovr.algorithms.source.PPSU_weight_matching import bttl_threshold
@@ -680,11 +681,15 @@ def regroup_parallel_moves_fast(
                 continue
 
             parallel_moves.append(p_move)
-            _, _, can_parallelize = get_AOD_cmds_from_move_list(
-                matrix_copy, parallel_moves, verify=True
+            horiz_AOD_cmds, vert_AOD_cmds, can_parallelize = (
+                get_AOD_cmds_from_move_list(matrix_copy, parallel_moves, verify=True)
             )
 
             if not can_parallelize:
+                parallel_moves.pop()
+                continue
+
+            if _has_colliding_tones(vert_AOD_cmds, horiz_AOD_cmds):
                 parallel_moves.pop()
                 continue
 

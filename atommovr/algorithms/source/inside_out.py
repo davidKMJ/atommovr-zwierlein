@@ -4,6 +4,7 @@ from typing import Callable
 
 from atommovr.utils.AtomArray import AtomArray
 from atommovr.utils.Move import Move
+from atommovr.algorithms.source.Hungarian_works import regroup_parallel_moves_fast
 from atommovr.algorithms.source.inside_out_utils import (
     is_site_correct,
     clean_empty_moves,
@@ -22,7 +23,6 @@ from atommovr.algorithms.source.inside_out_utils import (
     categ_2_move_exe,
     push_out_obstacles,
     diff_species_ok,
-    regroup_parallel_moves,
     gen_dual_assign_new,
     generate_decomposed_move_list,
 )
@@ -370,8 +370,8 @@ def transform_paths_into_moves(
 
         # 3) Parallelize moves in this round
         if len(moves_in_scan) > 0:
-            matrix = arrays.matrix[:, :, 0] + arrays.matrix[:, :, 1]
-            moves_in_scan = regroup_parallel_moves(matrix, moves_in_scan)
+            matrix = np.asarray(arrays.matrix[:, :, 0] + arrays.matrix[:, :, 1])
+            moves_in_scan = regroup_parallel_moves_fast(matrix, moves_in_scan)
             # 2.1.3 Implement the moves
             parallel_moves.extend(moves_in_scan)
             for moves in moves_in_scan:
