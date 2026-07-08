@@ -32,7 +32,7 @@ class InsideOut(Algorithm):
     def __repr__(self):
         return "InsideOut"
 
-    def get_moves(self, dual_sp_array: AtomArray):
+    def get_moves(self, dual_sp_array: AtomArray, do_ejection: bool = False):
         # If the atom array does not have enough atoms, return the same array, empty move list, and False for success flag.
         if (
             np.sum(dual_sp_array.matrix[:, :, 0])
@@ -48,7 +48,7 @@ class InsideOut(Algorithm):
             np.multiply(dual_sp_array.matrix, dual_sp_array.target),
         ):
             return dual_sp_array, [], True
-        return inside_out_algorithm(dual_sp_array)
+        return inside_out_algorithm(dual_sp_array, do_ejection=do_ejection)
 
 
 class NaiveParHung(Algorithm):
@@ -59,7 +59,7 @@ class NaiveParHung(Algorithm):
     def __repr__(self):
         return "NaiveParHung"
 
-    def get_moves(self, dual_sp_array: AtomArray):
+    def get_moves(self, dual_sp_array: AtomArray, do_ejection: bool = False):
         # If the atom array does not have enough atoms, return the same array, empty move list, and False for success flag.
         if (
             np.sum(dual_sp_array.matrix[:, :, 0])
@@ -75,4 +75,4 @@ class NaiveParHung(Algorithm):
             np.multiply(dual_sp_array.matrix, dual_sp_array.target),
         ):
             return dual_sp_array, [], True
-        return naive_par_Hung(dual_sp_array)
+        return naive_par_Hung(dual_sp_array, do_ejection=do_ejection)
