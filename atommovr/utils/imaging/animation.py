@@ -1,3 +1,5 @@
+import copy
+
 # Code to visualize the atom array and generate gifs of the rearrangement process.
 
 import numpy as np
@@ -455,7 +457,7 @@ def make_single_species_gif(
         plt.savefig(f"./figs/frames/frame{move_ind+1}")
         plt.close()
 
-        # # simulating atom loss NB: this is now done in `ErrorModel` (see atommover.utils.errormodels)
+        # # simulating atom loss NB: this is now done in `ErrorModel` (see atommovr.utils.errormodels)
         # matrix, loss_flag = atom_loss(matrix, t_move, params.lifetime)
 
     with imageio.get_writer(

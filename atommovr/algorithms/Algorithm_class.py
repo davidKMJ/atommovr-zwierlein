@@ -20,7 +20,7 @@ class Algorithm:
 
     e.g:
 
-    Supported configurations: Middle Fill (see `atommover.utils.core.Configurations`
+    Supported configurations: Middle Fill (see `atommovr.utils.core.Configurations`
     for a list of configurations).
     """
 
@@ -43,7 +43,7 @@ class Algorithm:
 
         **do_ejection** : bool, optional (default = False)
             argument to run an ejection subroutine(see
-            `atommover.algorithms.source.ejection.py` for the protocol).
+            `atommovr.algorithms.source.ejection.py` for the protocol).
 
         any other (optional!) kwargs you see fit to include :)
 
@@ -86,7 +86,6 @@ class Algorithm:
         """
         Checks if the target configuration was prepared and returns a flag.
         """
-
         if np.shape(state) != np.shape(target):
             print(
                 f"Mismatch in shapes {np.shape(state)} and {np.shape(target)}. Reshaping."
@@ -167,6 +166,10 @@ def get_effective_target_grid(target, n_species=1):
         if 1 in col1:
             end_col = n_cols - 1 - col_ind
             break
+
+    # Convert inclusive indices to exclusive bounds for safe slicing.
+    end_row += 1
+    end_col += 1
     try:
         return start_row, end_row, start_col, end_col
     except UnboundLocalError as ule:
