@@ -55,7 +55,8 @@ def _finalize_with_standard_ejection(
     if ejection_flag:
         bounds = [0, state_2d.shape[0] - 1, 0, state_2d.shape[1] - 1]
         try:
-            # Newer ejection API supports selecting a method.
+            # Falls back to the 3-arg call for user-supplied ejection()
+            # implementations that don't accept `method`.
             eject_moves, state_2d = ejection(
                 state_2d,
                 target_2d,
@@ -63,7 +64,6 @@ def _finalize_with_standard_ejection(
                 method=ejection_method,
             )
         except TypeError:
-            # Backward compatibility for older ejection signatures.
             eject_moves, state_2d = ejection(state_2d, target_2d, bounds)
         combined_moves.extend(eject_moves)
         success_flag = Algorithm.get_success_flag(state_2d, target_2d, do_ejection=True)
@@ -97,7 +97,6 @@ class ParallelHungarian(Algorithm):
         self,
         atom_array: AtomArray,
         do_ejection: bool = False,
-        final_size: list | None = None,
         round_lim: int = 0,
     ):
         if atom_array.n_species != 1:
@@ -129,7 +128,6 @@ class ParallelLBAP(Algorithm):
         self,
         atom_array: AtomArray,
         do_ejection: bool = False,
-        final_size: list | None = None,
         round_lim: int = 0,
     ):
         if atom_array.n_species != 1:

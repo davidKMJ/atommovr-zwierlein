@@ -103,47 +103,24 @@ def _get_lib():
     if _LIB is None:
         _LIB = load_shared_library()
         _LIB.bttlThreshold.argtypes = [
-            ctypes.POINTER(ctypes.c_int),
-            ctypes.POINTER(ctypes.c_int),
-            ctypes.POINTER(ctypes.c_double),
-            ctypes.c_int,
-            ctypes.c_int,
-            ctypes.POINTER(ctypes.c_int),
-            ctypes.POINTER(ctypes.c_int),
-            ctypes.POINTER(ctypes.c_int),
-            ctypes.POINTER(ctypes.c_int),
-            ctypes.POINTER(ctypes.c_double),
-            ctypes.POINTER(ctypes.c_int),
-            ctypes.POINTER(ctypes.c_int),
-            ctypes.c_int,
-            ctypes.POINTER(ctypes.c_double),
-            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_int),  # col_ptrs
+            ctypes.POINTER(ctypes.c_int),  # col_ids
+            ctypes.POINTER(ctypes.c_double),  # col_vals
+            ctypes.c_int,  # n
+            ctypes.c_int,  # m
+            ctypes.POINTER(ctypes.c_int),  # match
+            ctypes.POINTER(ctypes.c_int),  # row_match
+            ctypes.POINTER(ctypes.c_int),  # row_ptrs
+            ctypes.POINTER(ctypes.c_int),  # row_ids
+            ctypes.POINTER(ctypes.c_double),  # row_vals
+            ctypes.POINTER(ctypes.c_int),  # fend_cols
+            ctypes.POINTER(ctypes.c_int),  # fend_rows
+            ctypes.c_int,  # lbapAlone
+            ctypes.POINTER(ctypes.c_double),  # thrshld_g
+            ctypes.c_int,  # sprankknown
         ]
-        _LIB.bttlThreshold.restype = ctypes.c_int
+        _LIB.bttlThreshold.restype = ctypes.c_int  # number of iterations
     return _LIB
-
-
-# lib = load_shared_library()
-
-# # Define the function signature for bttlThreshold
-# lib.bttlThreshold.argtypes = [
-#     ctypes.POINTER(ctypes.c_int),  # col_ptrs
-#     ctypes.POINTER(ctypes.c_int),  # col_ids
-#     ctypes.POINTER(ctypes.c_double),  # col_vals
-#     ctypes.c_int,  # n
-#     ctypes.c_int,  # m
-#     ctypes.POINTER(ctypes.c_int),  # match
-#     ctypes.POINTER(ctypes.c_int),  # row_match
-#     ctypes.POINTER(ctypes.c_int),  # row_ptrs
-#     ctypes.POINTER(ctypes.c_int),  # row_ids
-#     ctypes.POINTER(ctypes.c_double),  # row_vals
-#     ctypes.POINTER(ctypes.c_int),  # fend_cols
-#     ctypes.POINTER(ctypes.c_int),  # fend_rows
-#     ctypes.c_int,  # lbapAlone
-#     ctypes.POINTER(ctypes.c_double),  # thrshld_g
-#     ctypes.c_int,  # sprankknown
-# ]
-# lib.bttlThreshold.restype = ctypes.c_int  # Returns the number of iterations
 
 
 def bttl_threshold(col_ptrs, col_ids, col_vals, n, m, sprankknown=0, lbapAlone=1):
@@ -175,7 +152,6 @@ def bttl_threshold(col_ptrs, col_ids, col_vals, n, m, sprankknown=0, lbapAlone=1
     fend_rows = (ctypes.c_int * m)()  # Placeholder for fend_rows
     thrshld_g = ctypes.c_double()  # Threshold value
 
-    # Call the C function
     iterations = lib.bttlThreshold(
         col_ptrs,
         col_ids,
@@ -194,68 +170,9 @@ def bttl_threshold(col_ptrs, col_ids, col_vals, n, m, sprankknown=0, lbapAlone=1
         sprankknown,
     )
 
-    # Return results
     return {
         "iterations": iterations,
         "match": list(match),
         "row_match": list(row_match),
         "threshold": thrshld_g.value,
     }
-
-
-# Old code that broke github CI
-# import ctypes
-# import io
-# import os
-# import platform
-# import subprocess
-# import sys
-
-# # Locate the shared library in the c_code directory
-# BASE_DIR = os.path.abspath(os.path.join(__file__, "../../../.."))
-
-# # Path to the PPSU2023 directory (in the project root)
-# PPSU_DIR = os.path.join(BASE_DIR, "PPSU2023")
-
-# # Path to the shared library and setup script
-# LIB_PATH = os.path.join(PPSU_DIR, "libmatching_for_PPSU.so")
-# SETUPC_PATH = os.path.join(PPSU_DIR, "setupc.py")
-
-# def build_shared_library():
-#     """Run PPSU2023/setupc.py to build the shared library."""
-#     if not os.path.isfile(SETUPC_PATH):
-#         raise RuntimeError(f"setupc.py not found at expected path: {SETUPC_PATH}")
-#     print(f"[INFO] Attempting to build shared library via {SETUPC_PATH}...")
-#     subprocess.run([sys.executable, SETUPC_PATH, "build_ext"], check=True, cwd=PPSU_DIR)
-#     print("[INFO] Build completed.")
-
-# try:
-#     lib = ctypes.CDLL(LIB_PATH)
-# except OSError as e:
-#     print(f"[WARNING] Failed to load shared library at {LIB_PATH}: {e}")
-#     build_shared_library()
-#     lib = ctypes.CDLL(LIB_PATH)
-
-# # Platform-specific handling for accessing the standard C library
-# try:
-#     if platform.system() == "Windows":
-#         # On Windows, use msvcrt for C standard library functions
-#         libc = ctypes.CDLL("msvcrt")
-#     else:
-#         # On Unix-like systems (Linux, macOS), use None to get the default C library
-#         libc = ctypes.CDLL(None)
-
-#     try:
-#         stdout_fileno = sys.stdout.fileno()
-#         libc.fflush(None)  # Flush C stdio buffers
-#     except (AttributeError, OSError, io.UnsupportedOperation):
-#         # If fileno() is not available (e.g., in Jupyter), skip the flush
-#         sys.stdout.flush()  # Use Python's flush instead
-#         stdout_fileno = None
-# except (OSError, AttributeError) as e:
-#     # If we can't access the C library, define a no-op flush function
-#     print(f"[WARNING] Could not access C library for fflush: {e}")
-#     def noop_flush():
-#         sys.stdout.flush()  # Use Python's flush instead
-#     libc = type('MockLibc', (), {'fflush': lambda x: noop_flush()})()
-#     stdout_fileno = None

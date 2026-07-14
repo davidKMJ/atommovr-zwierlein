@@ -63,6 +63,7 @@ CONFIGURATION_PLOT_LABELS = {
 class PhysicalParams:
     """
     Class used to store various physical parameters corresponding to atom, array and optical tweezer properties.
+    
     Parameters
     ----------
     AOD_speed : float, optional
@@ -79,12 +80,14 @@ class PhysicalParams:
     middle_size : list[int], optional
         The desired size of the target (in rows, columns). If none is specified
         it will be automatically calculated.
+    
     Attributes
     ----------
         Spacing between adjacent atoms in the square array, in m.
         The probability that a single site will be filled during loading.
         The probability that a site in the target configuration will be occupied.
         The speed of the moving tweezers, in um/us.
+    
     Raises
     ------
     ValueError
@@ -547,10 +550,10 @@ def get_move_distance(
     from_row: int, from_col: int, to_row: int, to_col: int, spacing: float = 5e-6
 ) -> float:
     """
-    Calculates the physical distance for moving an atom from one position to another.
+    Manhattan (L1) lattice distance in meters.
 
-    Computes the Manhattan distance (L1 norm) between two positions in the array
-    and converts it to physical units using the lattice spacing.
+    This helper is **not** the AOD transport clock.  Parallel V/H travel
+    timing uses Chebyshev via :func:`atommovr.utils.timing.travel_duration_s`.
 
     Parameters
     ----------
@@ -569,7 +572,7 @@ def get_move_distance(
     Returns
     -------
     float
-        The physical distance between the two positions, in meters.
+        The Manhattan distance between the two positions, in meters.
 
     Examples
     --------
@@ -661,6 +664,10 @@ def atom_loss_dual(
     move_time: float,
     lifetime: float = 30,
     rng: np.random.Generator | None = None,
+    pickup_fail_rate: float = 0.0,
+    putdown_fail_rate: float = 0.0,
+    move_distance_penalty: float = 0.0,
+    aod_jitter_probability: float = 0.0,
 ) -> Tuple[NDArray, bool]:
     """
     Sample atom loss for a dual-species array.
@@ -675,6 +682,14 @@ def atom_loss_dual(
         Vacuum-limited lifetime of a single atom in a tweezer.
     rng : np.random.Generator | None, optional
         Random number generator.
+    pickup_fail_rate : float, optional
+        Base probability of failure for pickup operations.
+    putdown_fail_rate : float, optional
+        Base probability of failure for putdown operations.
+    move_distance_penalty : float, optional
+        Penalty for longer move distances.
+    aod_jitter_probability : float, optional
+        Probability of jitter in AOD pointing.
 
     Returns
     -------
@@ -696,7 +711,16 @@ def atom_loss_dual(
             f"`matrix` must have shape (rows, cols, 2); got {np.shape(matrix)}."
         )
 
-    return atom_loss(matrix, move_time, lifetime=lifetime, rng=rng)
+    return atom_loss(
+        matrix,
+        move_time,
+        lifetime=lifetime,
+        rng=rng,
+        pickup_fail_rate=pickup_fail_rate,
+        putdown_fail_rate=putdown_fail_rate,
+        move_distance_penalty=move_distance_penalty,
+        aod_jitter_probability=aod_jitter_probability,
+    )
 
 
 def count_atoms_in_row(row: int) -> int:

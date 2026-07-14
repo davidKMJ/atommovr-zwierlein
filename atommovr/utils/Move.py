@@ -125,7 +125,8 @@ class Move:
         - SUCCESS -> SUCCESS
         - PICKUP_FAIL -> NO_PICKUP (atom stays at source)
         - NO_ATOM -> NO_ATOM (no atom to move)
-        - PUTDOWN_FAIL, CROSSED_STATIC, CROSSED_MOVING, ACCEL_FAIL, DECEL_FAIL, TRANSPORT_FAIL -> LOSS (atom is lost)
+        - PUTDOWN_FAIL, ACCEL_FAIL, DECEL_FAIL, TRANSPORT_FAIL, COLLISION_INEVITABLE,
+          COLLISION_AVOIDABLE -> LOSS (atom is lost)
         """
         if self.fail_event not in FAILURE_EVENT_TO_FLAG:
             raise ValueError(f"Invalid fail_event: {self.fail_event}")

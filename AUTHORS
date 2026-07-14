@@ -16,7 +16,22 @@ benchmark infrastructure.
 Sascha Benz
 Ludwig-Maximilians-Universitaet Muenchen, Ryd-Yb tweezer array group
 2025-2026
-Imaging pipeline, PCFA rearrangement algorithm, Tetris rearrangement algorithm,  AWG controller for Spectrum Instrumentation M4i.6631-x8 cards with DDS cores: RFConverter, AWGBatch, AODSettings, RFRamp, and core-assignment logic,  DDS execution strategies: ramp, pattern, and camera-triggered modes, atommovr production controller, Benchmark and analysis scripts (run_rearranging_benchmarks.py and extension of benchmarking.py), Demonstration scripts (demo_awg_control.py, demo_pipeline.py, imaging_demo.py), Image scaling and blob parameter optimisation scripts, Test suite extensions (test_awg_control.py, test_controller_pipeline.py, test_imaging.py additions)
+Imaging pipeline, PCFA rearrangement algorithm, Tetris rearrangement algorithm,
+AWG controller for Spectrum Instrumentation M4i.6631-x8 cards with DDS cores:
+RFConverter, AWGBatch, AODSettings, RFRamp, and core-assignment logic, DDS
+execution strategies: ramp, pattern, and camera-triggered modes, atommovr
+production controller, Benchmark and analysis scripts
+(run_rearranging_benchmarks.py and extension of benchmarking.py), Demonstration
+scripts (demo_awg_control.py, demo_pipeline.py, imaging_demo.py), Image scaling
+and blob parameter optimisation scripts, Test suite extensions
+(test_awg_control.py, test_controller_pipeline.py, test_imaging.py additions)
+
+David Minjae Ko
+Massachusetts Institute of Technology, Zwierlein group
+2026
+Camera interfaces (Camera, RealArrayCamera, OfflineArrayCamera), SessionRecorder,
+shared travel timing (atommovr.utils.timing), closed-loop controller refinements,
+code merging and cleanup
 
 ## Third-party code and attributions
 

@@ -17,7 +17,7 @@ from typing import Dict, List
 
 from atommovr.utils.Move import Move
 from atommovr.utils.core import PhysicalParams
-
+from atommovr.utils.timing import MIN_MOVE_DURATION_S, travel_duration_s
 
 # ---------------------------------------------------------------------------
 # Hardware constants  (source of truth: cli.py + spcm documentation)
@@ -91,10 +91,10 @@ def compute_core_assignments(
     # cli.py: if ch1 needs ≤1 tone → only core 20; otherwise full set 8-11, 20
     if n_col_tones <= 1:
         ch1_cores = CHANNEL_1_SINGLE_CORE
-        ch0_pool = ALL_CHANNEL_0_CORES           # 0-19 (no overlap)
+        ch0_pool = ALL_CHANNEL_0_CORES  # 0-19 (no overlap)
     else:
         ch1_cores = CHANNEL_1_FULL_CORES
-        ch0_pool = CHANNEL_0_EXCLUSIVE_CORES     # 0-7, 12-19
+        ch0_pool = CHANNEL_0_EXCLUSIVE_CORES  # 0-7, 12-19
 
     if n_row_tones > len(ch0_pool):
         raise ValueError(
@@ -120,13 +120,15 @@ def validate_hardware_limits(grid_rows: int, grid_cols: int) -> None:
 # Data-transfer objects
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class AODSettings:
-    """Frequency-range and geometry settings for the AWG card.
+    """Frequency-range and geometry settings for the AWG / AOD pair.
 
-    ``f_min_v / f_max_v`` span the vertical (row) AOD bandwidth.
-    ``f_min_h / f_max_h`` span the horizontal (column) AOD bandwidth.
-    Grid dimensions determine the site-to-frequency mapping.
+    Site → RF mapping is index-linear over ``[f_min, f_max]`` (same as the
+    imaging pipeline's grid indices after blob → rotate → assign).  Optional
+    ``um_per_mhz`` is only a lab ballpark for FOV estimates, not used by the
+    DDS path.
     """
 
     # Frequency ranges (Hz)
@@ -135,7 +137,7 @@ class AODSettings:
     f_min_h: float = 60e6
     f_max_h: float = 100e6
 
-    # Total trap-grid dimensions
+    # Total trap-grid dimensions (DDS tone counts)
     grid_rows: int = 10
     grid_cols: int = 10
 
@@ -143,7 +145,14 @@ class AODSettings:
     target_rows: int = 6
     target_cols: int = 6
 
-    alignment: str = "center"   # "center" | "start"
+    alignment: str = "center"  # "center" | "start"
+
+    #: Approximate trap shift per MHz (µm/MHz).  Optics ballpark (~6.53 for
+    #: the Zwierlein 808 nm / f1=75 / f2=400 / f_obj=28 setup); not used for RF.
+    um_per_mhz: float = 6.526
+
+    #: Lab optics ballpark (µm per MHz). FOV helpers only — RF uses f_min/f_max.
+    um_per_mhz: float = 6.526
 
     @property
     def f_spacing_v(self) -> float:
@@ -154,6 +163,16 @@ class AODSettings:
     def f_spacing_h(self) -> float:
         """Column-axis inter-site frequency step (Hz)."""
         return (self.f_max_h - self.f_min_h) / max(self.grid_cols - 1, 1)
+
+    @property
+    def fov_um_v(self) -> float:
+        """Vertical field of view (µm) from RF bandwidth × ``um_per_mhz``."""
+        return self.um_per_mhz * (self.f_max_v - self.f_min_v) / 1e6
+
+    @property
+    def fov_um_h(self) -> float:
+        """Horizontal field of view (µm) from RF bandwidth × ``um_per_mhz``."""
+        return self.um_per_mhz * (self.f_max_h - self.f_min_h) / 1e6
 
     def validate_core_limits(self) -> None:
         """Raise ``ValueError`` if grid dimensions exceed available DDS cores."""
@@ -181,8 +200,9 @@ class RFRamp:
     phase_deg : float
         Core phase offset (degrees), default 0.
     duration_s : float
-        Physical move duration (s).  The controller waits this long before
-        acquiring the verification image.
+        **Travel** duration (s) for this batch — Chebyshev × spacing /
+        ``AOD_speed`` via ``atommovr.utils.timing.travel_duration_s``.
+        Used for DDS TIMER / slopes / host transport waits.
     """
 
     channel: int
@@ -196,9 +216,10 @@ class RFRamp:
 
 @dataclass
 class AWGBatch:
-    """Set of RF commands executed in a single hardware trigger event.
+    """Set of RF commands for one parallel move batch.
 
-    One ``AWGBatch`` corresponds to one parallel batch of atom moves.
+    ``total_duration_s`` is the **travel** window
+    (Chebyshev × spacing / ``AOD_speed``), consumed by every DDS strategy.
     """
 
     ramps: List[RFRamp]
@@ -209,14 +230,19 @@ class AWGBatch:
 # Converter
 # ---------------------------------------------------------------------------
 
+
 class RFConverter:
     """Translate logical ``Move`` objects into ``AWGBatch`` hardware commands.
 
     Amplitude budget rule (from cli.py comments):
         Per-core amplitude = 40 % / n_simultaneous_tones_on_channel
 
-    Move duration is computed from the Chebyshev distance between source and
-    target (parallel V and H moves overlap in time) and the AOD speed.
+    Move travel duration is computed by
+    :func:`atommovr.utils.timing.travel_duration_s` (Chebyshev × spacing /
+    ``AOD_speed``).  Parallel V and H tones overlap in time.
+
+    Site frequencies are index-linear over ``AODSettings`` ``[f_min, f_max]``,
+    matching the grid indices produced by imaging (blob → rotate → assign).
 
     Parameters
     ----------
@@ -232,7 +258,8 @@ class RFConverter:
         # when the grid exceeds single-card limits (simulation / testing).
         try:
             self._core_map = compute_core_assignments(
-                settings.grid_rows, settings.grid_cols,
+                settings.grid_rows,
+                settings.grid_cols,
             )
         except ValueError:
             self._core_map = {
@@ -259,16 +286,8 @@ class RFConverter:
         return self.settings.f_min_h + col * self.settings.f_spacing_h
 
     def _move_duration_s(self, moves: List[Move]) -> float:
-        """Physical duration (s) for the longest move in the batch."""
-        if not moves:
-            return 0.0
-        max_cheb = max(
-            max(abs(m.to_row - m.from_row), abs(m.to_col - m.from_col))
-            for m in moves
-        )
-        dist_m = max_cheb * self.params.spacing
-        duration_s = dist_m / max(self.params.AOD_speed, 1e-15)
-        return max(duration_s, 1e-6)   # floor at 1 us
+        """Travel duration (s) for the longest move in the batch."""
+        return travel_duration_s(moves, self.params.spacing, self.params.AOD_speed)
 
     @staticmethod
     def _per_tone_amplitude(n: int) -> float:
@@ -295,18 +314,26 @@ class RFConverter:
         ramps: List[RFRamp] = []
         for i, core in enumerate(v_cores):
             f = self._row_to_freq(i)
-            ramps.append(RFRamp(
-                channel=0, core=core,
-                f_start=f, f_end=f,
-                amplitude_pct=amp_v,
-            ))
+            ramps.append(
+                RFRamp(
+                    channel=0,
+                    core=core,
+                    f_start=f,
+                    f_end=f,
+                    amplitude_pct=amp_v,
+                )
+            )
         for j, core in enumerate(h_cores):
             f = self._col_to_freq(j)
-            ramps.append(RFRamp(
-                channel=1, core=core,
-                f_start=f, f_end=f,
-                amplitude_pct=amp_h,
-            ))
+            ramps.append(
+                RFRamp(
+                    channel=1,
+                    core=core,
+                    f_start=f,
+                    f_end=f,
+                    amplitude_pct=amp_h,
+                )
+            )
         return AWGBatch(ramps=ramps, total_duration_s=0.0)
 
     def convert_moves(self, moves: List[Move]) -> AWGBatch:
@@ -370,12 +397,16 @@ class RFConverter:
                     f"Row move targets out-of-bounds index {target_row} "
                     f"(grid has {grid_rows} rows)."
                 )
-            ramps.append(RFRamp(
-                channel=0, core=core,
-                f_start=self._row_to_freq(row_idx),
-                f_end=self._row_to_freq(target_row),
-                amplitude_pct=amp_v, duration_s=duration_s,
-            ))
+            ramps.append(
+                RFRamp(
+                    channel=0,
+                    core=core,
+                    f_start=self._row_to_freq(row_idx),
+                    f_end=self._row_to_freq(target_row),
+                    amplitude_pct=amp_v,
+                    duration_s=duration_s,
+                )
+            )
         for col_idx, core in enumerate(h_cores):
             target_col = col_targets.get(col_idx, col_idx)
             if target_col < 0 or target_col >= grid_cols:
@@ -383,12 +414,16 @@ class RFConverter:
                     f"Column move targets out-of-bounds index {target_col} "
                     f"(grid has {grid_cols} columns)."
                 )
-            ramps.append(RFRamp(
-                channel=1, core=core,
-                f_start=self._col_to_freq(col_idx),
-                f_end=self._col_to_freq(target_col),
-                amplitude_pct=amp_h, duration_s=duration_s,
-            ))
+            ramps.append(
+                RFRamp(
+                    channel=1,
+                    core=core,
+                    f_start=self._col_to_freq(col_idx),
+                    f_end=self._col_to_freq(target_col),
+                    amplitude_pct=amp_h,
+                    duration_s=duration_s,
+                )
+            )
 
         return AWGBatch(ramps=ramps, total_duration_s=duration_s)
 

@@ -14,18 +14,18 @@ Typical flow:
 3) Estimate grid rotation (optional) and rectify
 4) Assign centroids to grid with fit_grid_and_assign
 
-See atommovr/tests/test_imaging.py for examples.
+See atommovr/tests/imaging/test_imaging.py for examples.
 """
 
-from .generation import (
+from atommovr.utils.imaging.generation import (
     gaussian_2d,
     generate_gaussian_image,
     generate_gaussian_image_from_binary_grid,
 )
 
-from .geometry import rotate_points_ccw, rotate_points_cw
+from atommovr.utils.imaging.geometry import rotate_points_ccw, rotate_points_cw
 
-from .extraction import (
+from atommovr.utils.imaging.extraction import (
     Extractor,
     BlobDetection,
     fit_grid_and_assign,
@@ -63,6 +63,4 @@ __all__ = [
     "estimate_grid_rotation_fit_rect",
     "estimate_grid_rotation_fourier_img",
     "estimate_grid_rotation_fourier",
-    # viz
-    "overlay_centroids",
 ]

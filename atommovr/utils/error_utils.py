@@ -58,7 +58,7 @@ def set_event_bit_inplace(
         return
     if elig_size == 0:
         return
-    if event_mask.ndim != 1 | eligible.ndim != 1:
+    if event_mask.ndim != 1 or eligible.ndim != 1:
         raise ValueError(
             f"Parameters 'event_mask' and 'eligible' must be 1D arrays, not {event_mask.ndim}D and {eligible.ndim}D."
         )

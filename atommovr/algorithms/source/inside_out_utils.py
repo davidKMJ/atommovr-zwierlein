@@ -100,22 +100,20 @@ def gen_dual_assign_new(arrays: AtomArray, layer_factor: int):
         arrays, layer_factor, "layer", is_cs_target(arrays)
     )
 
-    # 2. Get outer-based source/target coords + reservoir
+    # 2. Get outer-based source coords + reservoir
     Rb_source = collect_coords(arrays, layer_factor, "outer", is_rb_source(arrays))
     Cs_source = collect_coords(arrays, layer_factor, "outer", is_cs_source(arrays))
-    Rb_target = collect_coords(arrays, layer_factor, "outer", is_rb_target(arrays))
-    Cs_target = collect_coords(arrays, layer_factor, "outer", is_cs_target(arrays))
     reservoir = collect_coords(arrays, layer_factor, "outer", is_reservoir(arrays))
 
     # 3. Assign for Rb
     rb_assignments, reservoir = assign_species(
-        Rb_source_layer, Rb_source, Rb_target_layer, Rb_target, reservoir
+        Rb_source_layer, Rb_source, Rb_target_layer, reservoir
     )
     prepared_assignments.extend(rb_assignments)
 
     # 4. Assign for Cs
     cs_assignments, reservoir = assign_species(
-        Cs_source_layer, Cs_source, Cs_target_layer, Cs_target, reservoir
+        Cs_source_layer, Cs_source, Cs_target_layer, reservoir
     )
     prepared_assignments.extend(cs_assignments)
 
@@ -234,11 +232,10 @@ def out_bound_ex(x, y, top, left, bottom, right):
 
 
 def assign_species(
-    source_layer, source_outer, target_layer, _target_outer, reservoir
+    source_layer, source_outer, target_layer, reservoir
 ) -> "tuple[list[tuple[tuple[int, int]]], list[tuple]]":
     # Make move out assignments
     assignments = []
-    # all_target = target_layer + target_outer + reservoir
     all_source = source_layer + source_outer
 
     cost_matrix = generate_cost_matrix_inside_out(all_source, target_layer)
@@ -348,9 +345,7 @@ class BFSResult:
 
 def process_chain_moves_new(bfs_res: BFSResult):
     bfs_res.same_obstacle = (
-        []
-        if bfs_res.same_obstacle is None
-        else bfs_res.same_obstacle  # previously == None
+        [] if bfs_res.same_obstacle is None else bfs_res.same_obstacle
     )
     single_path = []
     segmant_path = []
@@ -598,7 +593,7 @@ def collect_non_conflicting_moves(
     used_from = set()
     used_to = set()
 
-    # You may need a quick snapshot of your occupancy matrix
+    # Combined occupancy across both species
     matrix_occupancy = arrays.matrix[:, :, 0] + arrays.matrix[:, :, 1]
 
     for move in candidates:
@@ -641,7 +636,6 @@ def regroup_parallel_moves(matrix, move_seqq):
             if p_move_ind in parallel_ind_set:
                 continue
 
-            # horiz_AOD_cmds, vert_AOD_cmds, can_parallelize, move_list_with_ghost = generate_AOD_cmds(matrix_copy, parallel_moves + [p_move])
             _horiz_AOD_cmds, _vert_AOD_cmds, can_parallelize = generate_AOD_cmds(
                 matrix_copy, parallel_moves + [p_move]
             )

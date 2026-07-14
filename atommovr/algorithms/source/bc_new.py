@@ -115,19 +115,12 @@ def choose_best_atom_set_1d(
     """
     Choose the contiguous subset of row atoms that should be assigned to the target.
 
-    Why this exists
-    ---------------
-    The compact vote logic does not need the full 1D transport schedule for each
-    row on every iteration. It only needs to know which current atoms belong to
-    the best noncrossing assignment to the target support. This helper isolates
-    that selection step without constructing AtomArray objects or simulating
-    moves through the full move pipeline.
-
-    The selected subset matches the current middle-fill policy:
-    among contiguous subsets of the current row atoms with the required target
-    cardinality, choose one minimizing the largest travel distance to the
-    corresponding target columns, with the same central-window initialization
-    used by the existing helper.
+    Isolates the selection step used by the compact vote logic (which needs only
+    the chosen atom set, not a full 1D transport schedule) without constructing
+    an AtomArray or simulating moves. Matches the middle-fill policy: among
+    contiguous subsets of the current row atoms with the required target
+    cardinality, picks the one minimizing the largest travel distance to the
+    corresponding target columns, starting from a central window.
 
     Parameters
     ----------
@@ -279,26 +272,18 @@ def choose_best_atom_set_1d(
 
 
 def first_round_edges_for_best_set(
-    init_config: np.ndarray,
     target_config: np.ndarray,
     best_atom_set: np.ndarray,
 ) -> set[tuple[int, int]]:
     """
     Return the first-step horizontal edges for the chosen 1D atom subset.
 
-    Why this exists
-    ---------------
-    The compact vote logic only needs to know, for each currently chosen row atom,
-    whether its first legal unit step under the noncrossing target assignment is
-    to the left, to the right, or to stay put. It does not need the full 1D move
-    schedule. This helper constructs exactly that first-round edge set for the
-    chosen contiguous subset.
+    The compact vote logic only needs each chosen atom's first legal unit step
+    (left/right/stay) under the noncrossing target assignment, not the full 1D
+    move schedule, so this builds just that first-round edge set.
 
     Parameters
     ----------
-    init_config
-        Initial 1-row occupancy array with shape ``(1, n_cols, 1)`` or
-        ``(1, n_cols)``.
     target_config
         Target 1-row occupancy array with shape ``(1, n_cols, 1)`` or
         ``(1, n_cols)``.
@@ -364,8 +349,7 @@ def special_case_algo_1d(
     arr_copy.target = copy.deepcopy(target_config)
     arr_copy.matrix = copy.deepcopy(init_config)
 
-    # first, find the column indices of the target sites
-    # and those of the sites with atoms
+    # column indices of the target sites and of the sites with atoms
     target_indices = np.where(arr_copy.target == 1)[1]
     atom_indices = np.where(arr_copy.matrix == 1)[1]
 
@@ -374,13 +358,12 @@ def special_case_algo_1d(
             f"Number of atoms ({len(atom_indices)}) does not equal number of target sites ({len(target_indices)})."
         )
 
-    # second, we can pair the atoms and make a list
+    # pair each atom with its target column, then move atoms toward their pair
     pairs = []
     for ind, target_index in enumerate(target_indices):
         atom_index = atom_indices[ind]
         pair = (target_index, atom_index)
         pairs.append(pair)
-    # lastly, we can move atoms towards their target positions
     target_prepared = np.array_equal(arr_copy.target, arr_copy.matrix)
     move_set = []
     while not target_prepared:
@@ -400,7 +383,6 @@ def special_case_algo_1d(
     return move_set, atom_indices.tolist()
 
 
-# utility function that calculates the longest move distance between target sites and atom sites
 def find_largest_dist_to_move(target_inds, atom_inds):
     if len(target_inds) > len(atom_inds):
         return np.inf
@@ -420,13 +402,9 @@ def middle_fill_algo_1d(
     Choose a contiguous set of atoms for 1D row compaction and generate the
     corresponding move rounds.
 
-    Why this exists
-    ---------------
-    In rows with more atoms than target sites, there are many possible subsets of
-    atoms that could be used to realize the target support. This helper chooses a
-    "central" contiguous subset and then refines that choice by comparing adjacent
-    candidate subsets, favoring the one with the smaller worst-case travel
-    distance.
+    Rows with more atoms than target sites admit many valid subsets; this starts
+    from a central contiguous subset and refines by comparing adjacent candidate
+    subsets, favoring the smaller worst-case travel distance.
 
     Parameters
     ----------
@@ -578,11 +556,9 @@ def _target_col_bounds_for_rows(
     """
     Return the inclusive target-column bounds relevant to a row interval.
 
-    Why this exists
-    ---------------
-    The controller-level horizontal cut-capacity helper needs a preferred target
-    column window. For row-balancing and prebalance, the natural window is the
-    target support within the active row interval, not the full array width.
+    Used by the controller's horizontal cut-capacity helper: for row-balancing
+    and prebalance, the preferred column window is the target support within the
+    active row interval, not the full array width.
 
     Parameters
     ----------
@@ -625,12 +601,10 @@ def balance_rows(
     """
     Balance atom supply between the two child halves of ``[i, j]``.
 
-    Why this exists
-    ---------------
-    Recursive BC balancing works by ensuring that each child half of an interval
-    contains enough atoms to realize the target support inside that child. This
-    function computes the exact net atom transfer required across the cut between
-    the two halves and delegates the actual routing to ``move_across_rows(...)``.
+    Recursive BC balancing requires each child half of an interval to contain
+    enough atoms to realize the target support inside that child. This computes
+    the exact net atom transfer required across the cut between the two halves
+    and delegates routing to ``move_across_rows(...)``.
 
     Contract
     --------
@@ -770,17 +744,11 @@ def prebalance(
     """
     Ensure the target-row band contains enough atoms before recursive row balancing.
 
-    Why this exists
-    ---------------
-    Recursive ``balance_rows(...)`` assumes the target-row band already contains at
-    least as many atoms in total as the target support inside that band. This
-    function fills that band by pulling atoms across its top and bottom boundaries
-    using the same controller machinery as the balancing step.
-
-    The micro-objective here is simpler than full recursive balancing:
-    populate the target-row band with enough total atoms, then stop. The function
-    should not spend extra rounds after the band first becomes sufficient, though
-    opportunistic oversupply within a successful final round is allowed.
+    Recursive ``balance_rows(...)`` assumes the target-row band already has at
+    least as many atoms as the target support inside it. This fills that band by
+    pulling atoms across its top and bottom boundaries using the same controller
+    machinery as the balancing step, stopping as soon as the band is sufficient
+    (opportunistic oversupply within the final round is allowed).
 
     Parameters
     ----------
@@ -941,15 +909,10 @@ def get_all_moves_btwn_rows_from_rows(
     """
     Build a greedy, parallelizable move set that transfers atoms between two rows.
 
-    Why this exists
-    ---------------
-    BCv2 calls row-to-row transfer many times. The dominant cost at high call counts
-    is *Python overhead* (slicing, repeated attribute lookups, repeated bounds checks),
-    not the simple local matching itself.
-
-    This helper isolates the core logic so callers that already have the row slices
-    can avoid reslicing `init_config` and can reuse temporary arrays in future
-    optimizations.
+    BCv2 calls row-to-row transfer many times, and at high call counts the
+    dominant cost is Python overhead (slicing, attribute/bounds lookups), not the
+    matching itself. This isolates the core logic so callers that already have
+    the row slices can avoid reslicing `init_config`.
 
     Contract
     --------
@@ -1024,11 +987,9 @@ def get_all_moves_btwn_rows(
     """
     Backwards-compatible wrapper returning `Move` objects.
 
-    Why this exists
-    ---------------
-    The rest of BCv2 expects a `list[Move]`. Internally we compute the same matching
-    using `get_all_moves_btwn_rows_cols` and only construct `Move` objects once we
-    know we have at least one move.
+    The rest of BCv2 expects a `list[Move]`; this computes the same matching via
+    `get_all_moves_btwn_rows_cols` and only constructs `Move` objects once at
+    least one move exists.
     """
     from_cols, to_cols, n_moves = get_all_moves_btwn_rows_cols(
         init_config, from_row_ind, to_row_ind
@@ -1049,11 +1010,9 @@ def get_all_moves_btwn_rows_faster(
     to_row_ind: int,
 ) -> tuple[list[Move], int]:
     """
-    Wrapper around `get_all_moves_btwn_rows_from_rows` that slices rows from `init_config`.
-
-    Why this exists
-    ---------------
-    Maintains the existing BCv2 API, but routes through the optimized core routine.
+    Wrapper around `get_all_moves_btwn_rows_from_rows` that slices rows from
+    `init_config`, keeping the existing BCv2 API while routing through the
+    optimized core routine.
 
     Parameters
     ----------
@@ -1195,22 +1154,14 @@ def compact(array) -> list[list[Move]]:
     """
     Compact atoms horizontally into the target rectangle using legal shared AOD frames.
 
-    Why this exists
-    ---------------
-    Under the updated collision model, the fully symmetric inward crunch is not a
-    physically admissible shared AOD command pattern: near the condensation column,
-    inward tones from both sides can create colliding tweezers / pile-ups.
-
-    This implementation compares four admissible candidate templates each round:
-    - left-center-deleted symmetric template
-    - right-center-deleted symmetric template
-    - pure right-moving template
-    - pure left-moving template
-
-    The chosen template must actually change the state. Among state-changing
-    candidates, we prefer those that maximize target overlap increase, with vote
-    sum used as a tie-breaker. A repeated-state guard is included to catch cycles
-    loudly rather than silently looping forever.
+    A fully symmetric inward crunch is not a physically admissible shared AOD
+    command pattern under the collision model: near the condensation column,
+    inward tones from both sides can create colliding tweezers/pile-ups. Instead
+    each round compares four admissible candidate templates (left-center-deleted
+    symmetric, right-center-deleted symmetric, pure right-moving, pure
+    left-moving), keeps only those that actually change the state, and picks the
+    one maximizing target-overlap increase (vote sum as tie-breaker). A
+    repeated-state guard raises loudly on cycles instead of looping forever.
     """
     arr1 = copy.deepcopy(array)
 
@@ -1262,13 +1213,9 @@ def compact(array) -> list[list[Move]]:
 
     def _refresh_row_metadata(row: int) -> None:
         """
-        Recompute compact vote metadata for one row.
-
-        Notes
-        -----
-        This is the hot-path replacement for the old middle_fill_algo_1d(...)
-        call inside compact. It computes only the chosen atom subset and the
-        first-step horizontal edges needed by the vote tally.
+        Recompute compact vote metadata for one row: the chosen atom subset and
+        the first-step horizontal edges needed by the vote tally. Replaces the
+        old per-round middle_fill_algo_1d(...) call inside compact on the hot path.
         """
         row_init: np.ndarray = arr1.matrix[row, :, :].reshape(1, n_cols, 1)
         row_target: np.ndarray = arr1.target[row, :, :].reshape(1, n_cols, 1)
@@ -1278,7 +1225,6 @@ def compact(array) -> list[list[Move]]:
             row_target,
         )
         first_edges: set[tuple[int, int]] = first_round_edges_for_best_set(
-            row_init,
             row_target,
             best_atom_set=best_atom_cols,
         )

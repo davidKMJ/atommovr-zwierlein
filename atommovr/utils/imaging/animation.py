@@ -1,6 +1,6 @@
-import copy
+"""Visualize atom arrays and generate gifs of the rearrangement process."""
 
-# Code to visualize the atom array and generate gifs of the rearrangement process.
+import os
 
 import numpy as np
 import imageio.v2 as imageio
@@ -23,7 +23,6 @@ from atommovr.utils.customize import (
     PUTDOWNFAILCOL,
     PICKUPFAILCOL,
     EJECTCOL,
-    CROSSEDFAILCOL,
 )
 
 ######################################
@@ -92,9 +91,7 @@ def single_species_image(
     filled_inds_x, filled_inds_y, empty_inds_x, empty_inds_y = (
         _get_inds_for_circ_matr_plot(matrix)
     )
-    ax.scatter(
-        filled_inds_x, filled_inds_y, s=dotsize, c=atom_color
-    )  # , edgecolor=EDGECOL)
+    ax.scatter(filled_inds_x, filled_inds_y, s=dotsize, c=atom_color)
     ax.scatter(empty_inds_x, empty_inds_y, s=dotsize, c=NOATOMCOL, edgecolor=EDGECOL)
 
     # plotting arrows to indicate moves (NB: this does NOT apply the moves, but rather only adds the visualization)
@@ -102,14 +99,9 @@ def single_species_image(
         for move in move_list:
             ax.arrow(
                 move.from_col + np.sign(move.dx) * plt_spacer,
-                move.from_row
-                + np.sign(move.dy)
-                * plt_spacer,  # len(matrix[0])-1-(move.from_row+np.sign(move.dy)*plt_spacer),
+                move.from_row + np.sign(move.dy) * plt_spacer,
                 move.dx - np.sign(move.dx) * 2 * plt_spacer,
-                move.dy
-                - np.sign(move.dy)
-                * 2
-                * plt_spacer,  # -move.dy+np.sign(move.dy)*2*plt_spacer,
+                move.dy - np.sign(move.dy) * 2 * plt_spacer,
                 color=ARROWCOL,
                 width=0.03,
                 length_includes_head=True,
@@ -125,6 +117,7 @@ def single_species_image(
     ax.axis("off")  # Turn off the axis for a prettier plot
     plt.gca().invert_yaxis()  # invert y axis so that it visually represents the matrix state
     if savename != "":
+        os.makedirs("figs", exist_ok=True)
         plt.savefig(f"figs/{savename}")
     plt.show()
 
@@ -204,24 +197,14 @@ def dual_species_image(
 
     ax.scatter(white_inds_x, white_inds_y, s=dotsize, c=NOATOMCOL, edgecolor=EDGECOL)
 
-    # eject_x = []
-    # eject_y = []
-    # pickup_fail_x = []
-    # pickup_fail_y = []
-    # putdown_fail_x = []
-    # putdown_fail_y = []
-    # collision_fail_x = []
-    # collision_fail_y = []
-    # crossed_x = []
-    # crossed_y = []
     # plotting arrows to indicate moves
     if len(move_list) > 0:
         for _, move in enumerate(move_list):
             ax.arrow(
                 move.from_col + np.sign(move.dx) * plt_spacer,
-                len(matrix[0]) - (move.from_row + np.sign(move.dy) * plt_spacer),
+                move.from_row + np.sign(move.dy) * plt_spacer,
                 move.dx - np.sign(move.dx) * 2 * plt_spacer,
-                -move.dy + np.sign(move.dy) * 2 * plt_spacer,
+                move.dy - np.sign(move.dy) * 2 * plt_spacer,
                 color=ARROWCOL,
                 width=0.03,
                 length_includes_head=True,
@@ -234,6 +217,7 @@ def dual_species_image(
     ax.axis("off")
     plt.gca().invert_yaxis()  # invert y axis so that it visually represents the matrix state
     if savename != "":
+        os.makedirs("figs", exist_ok=True)
         plt.savefig(f"figs/{savename}")
 
     plt.show()
@@ -319,6 +303,7 @@ def make_single_species_gif(
     ax.set_aspect("equal")  # Make the circles appear closer
     ax.axis("off")  # Turn off the axis for a prettier plot
     plt.gca().invert_yaxis()  # invert y axis so that it visually represents the matrix state
+    os.makedirs("./figs/frames", exist_ok=True)
     plt.savefig("./figs/frames/frame0")
     plt.close()
 
@@ -348,8 +333,6 @@ def make_single_species_gif(
         putdown_fail_y = []
         collision_fail_x = []
         collision_fail_y = []
-        crossed_x = []
-        crossed_y = []
         for move_set_ind, move in enumerate(move_set):
             # checking whether the move failed or not
             if move_set_ind in failed_moves:
@@ -371,20 +354,15 @@ def make_single_species_gif(
                 # plot a green dot if ejection succeeded
                 if fail_flag == 0:
                     eject_x.append(move.from_col)
-                    eject_y.append(move.from_row)  # len(matrix[0])-move.from_row)
+                    eject_y.append(move.from_row)
 
             else:
                 # plotting an arrow for each individual move
                 ax.arrow(
                     move.from_col + np.sign(move.dx) * plt_spacer,
-                    move.from_row
-                    + np.sign(move.dy)
-                    * plt_spacer,  # len(matrix[0])-(move.from_row+np.sign(move.dy)*plt_spacer),
+                    move.from_row + np.sign(move.dy) * plt_spacer,
                     move.dx - np.sign(move.dx) * 2 * plt_spacer,
-                    move.dy
-                    - np.sign(move.dy)
-                    * 2
-                    * plt_spacer,  # -move.dy+np.sign(move.dy)*2*plt_spacer,
+                    move.dy - np.sign(move.dy) * 2 * plt_spacer,
                     color=ARROWCOL,
                     width=0.03,
                     length_includes_head=True,
@@ -398,9 +376,6 @@ def make_single_species_gif(
                 # plot a magenta dot if putdown failed
                 putdown_fail_x.append(move.from_col)
                 putdown_fail_y.append(move.from_row)
-            elif fail_flag == 4:
-                crossed_x.append(move.from_col)
-                crossed_y.append(move.from_row)
             elif is_illegal_move and fail_flag == 0:
                 # plot red dots if atoms collided
                 collision_fail_x.append(move.from_col)
@@ -434,10 +409,6 @@ def make_single_species_gif(
                     c=COLLISIONFAILCOL,
                     edgecolor=EDGECOL,
                 )
-            if len(crossed_x) > 0:
-                ax.scatter(
-                    crossed_x, crossed_y, s=dotsize, c=CROSSEDFAILCOL, edgecolor=EDGECOL
-                )
 
         # calculating the time
         t_total += move_time
@@ -457,9 +428,8 @@ def make_single_species_gif(
         plt.savefig(f"./figs/frames/frame{move_ind+1}")
         plt.close()
 
-        # # simulating atom loss NB: this is now done in `ErrorModel` (see atommovr.utils.errormodels)
-        # matrix, loss_flag = atom_loss(matrix, t_move, params.lifetime)
-
+    # Atom loss is now simulated in ErrorModel (atommovr.utils.errormodels),
+    # not here.
     with imageio.get_writer(
         f"./figs/{savename}.gif", mode="I", duration=duration
     ) as writer:
@@ -510,7 +480,6 @@ def make_dual_species_gif(
 
     # making reference time
     t_total = 0
-    # arrays = copy.deepcopy(dual_species_matrix)
 
     dotsize = np.min(
         [
@@ -547,6 +516,7 @@ def make_dual_species_gif(
         ax.set_title(f"t = {int(t_total*1e6)} \u03bc s")
         ax.axis("off")
     plt.gca().invert_yaxis()  # invert y axis so that it visually represents the matrix state
+    os.makedirs("./figs/frames", exist_ok=True)
     plt.savefig("./figs/frames/frame0")
     plt.clf()
 
@@ -575,7 +545,6 @@ def make_dual_species_gif(
             white_inds_x, white_inds_y, s=dotsize, c=NOATOMCOL, edgecolor=EDGECOL
         )
 
-        # distances = []
         eject_x = []
         eject_y = []
         pickup_fail_x = []
@@ -593,25 +562,25 @@ def make_dual_species_gif(
             else:
                 fail_flag = 0
 
-            if (
-                move.to_row > len(dual_species_array.matrix) - 1
-                or move.to_row < 0
-                or move.to_col < 0
-                or move.to_col > len(dual_species_array.matrix[0]) - 1
-                and fail_flag == 0
-            ):
+            try:
+                is_illegal_move = move.movetype == MoveType.ILLEGAL_MOVE
+                is_eject_move = move.movetype == MoveType.EJECT_MOVE
+            except AttributeError:
+                is_illegal_move = False
+                is_eject_move = False
+
+            if is_eject_move:
                 # plot a green dot if ejection succeeded
                 if fail_flag == 0:
                     eject_x.append(move.from_col)
-                    eject_y.append(len(dual_species_array.matrix[0]) - move.from_row)
+                    eject_y.append(move.from_row)
 
             # plotting an arrow for each individual move
             ax.arrow(
                 move.from_col + np.sign(move.dx) * plt_spacer,
-                len(dual_species_array.matrix[0])
-                - (move.from_row + np.sign(move.dy) * plt_spacer),
+                move.from_row + np.sign(move.dy) * plt_spacer,
                 move.dx - np.sign(move.dx) * 2 * plt_spacer,
-                -move.dy + np.sign(move.dy) * 2 * plt_spacer,
+                move.dy - np.sign(move.dy) * 2 * plt_spacer,
                 color=ARROWCOL,
                 width=0.03,
                 length_includes_head=True,
@@ -619,19 +588,17 @@ def make_dual_species_gif(
             if fail_flag == 1:
                 # plot a yellow dot if pickup failed
                 pickup_fail_x.append(move.from_col)
-                pickup_fail_y.append(len(dual_species_array.matrix[0]) - move.from_row)
+                pickup_fail_y.append(move.from_row)
             elif fail_flag == 2:
                 # plot a magenta dot if putdown failed
                 putdown_fail_x.append(move.from_col)
-                putdown_fail_y.append(len(dual_species_array.matrix[0]) - move.from_row)
-            elif fail_flag == 3:
+                putdown_fail_y.append(move.from_row)
+            elif is_illegal_move and fail_flag == 0:
                 # plot red dots if atoms collided
                 collision_fail_x.append(move.from_col)
-                collision_fail_y.append(
-                    len(dual_species_array.matrix[0]) - move.from_row
-                )
+                collision_fail_y.append(move.from_row)
                 collision_fail_x.append(move.to_col)
-                collision_fail_y.append(len(dual_species_array.matrix[0]) - move.to_row)
+                collision_fail_y.append(move.to_row)
 
             if len(eject_x) > 0:
                 ax.scatter(eject_x, eject_y, s=dotsize, c=EJECTCOL, edgecolor=EDGECOL)
@@ -673,9 +640,8 @@ def make_dual_species_gif(
         plt.savefig(f"./figs/frames/frame{move_ind+1}")
         plt.clf()
 
-        # # simulating atom loss
-        # arrays, loss_flag = atom_loss_dual(arrays, t_move, params.lifetime)
-
+    # Atom loss is now simulated in ErrorModel (atommovr.utils.errormodels),
+    # not here.
     with imageio.get_writer(
         f"./figs/{savename}.gif", mode="I", duration=duration
     ) as writer:
@@ -766,10 +732,10 @@ def _get_inds_for_circ_matr_plot(matrix: np.ndarray):
                 matval = matrix[row_ind][col_ind][0]
             if matval == 1:
                 filled_inds_x.append(col_ind)
-                filled_inds_y.append(row_ind)  # len(matrix)-1-row_ind)
+                filled_inds_y.append(row_ind)
             else:
                 empty_inds_x.append(col_ind)
-                empty_inds_y.append(row_ind)  # len(matrix)-1-row_ind)
+                empty_inds_y.append(row_ind)
     return filled_inds_x, filled_inds_y, empty_inds_x, empty_inds_y
 
 
@@ -806,13 +772,13 @@ def _dual_species_get_inds_for_circ_matr_plot(matrix: np.ndarray):
         for j in range(len(matrix[0])):
             if matrix[i][j][0] == 1:
                 blue_inds_x.append(j)
-                blue_inds_y.append(len(matrix[0]) - i)
+                blue_inds_y.append(i)
             elif matrix[i][j][1] == 1:
                 yellow_inds_x.append(j)
-                yellow_inds_y.append(len(matrix[0]) - i)
+                yellow_inds_y.append(i)
             else:
                 white_inds_x.append(j)
-                white_inds_y.append(len(matrix[0]) - i)
+                white_inds_y.append(i)
 
     return (
         blue_inds_x,

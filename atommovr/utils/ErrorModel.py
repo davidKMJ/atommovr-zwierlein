@@ -53,8 +53,8 @@ class ErrorModel:
     - `apply_putdown_errors_mask(event_mask, eligible) -> None`
     - `apply_accel_errors_mask(event_mask, eligible) -> None`
     - `apply_decel_errors_mask(event_mask, eligible) -> None`
-    - `apply_collision_inevitable_mask(event_mask, eligible) -> None`
-    - `apply_collision_avoidable_mask(event_mask, eligible) -> None`
+    - `apply_inevitable_collision_mask(event_mask, eligible) -> None`
+    - `apply_avoidable_collision_mask(event_mask, eligible) -> None`
 
     Expected inputs:
     - `event_mask`: `np.ndarray` of shape `(N,)`, dtype `np.uint64`
@@ -182,7 +182,7 @@ class ErrorModel:
         """
         Deterministically tag victims of inevitable collisions (always lost in policy).
 
-        Updates `event_mask` in-place by setting FailureBit.CROSSED_STATIC.
+        Updates `event_mask` in-place by setting FailureBit.COLLISION_INEVITABLE.
         """
         set_event_bit_inplace(
             event_mask=event_mask,
@@ -197,7 +197,7 @@ class ErrorModel:
         Deterministically tag victims of avoidable collisions.
 
         Policy will later suppress this bit if PICKUP_FAIL occurred for that move.
-        Updates `event_mask` in-place by setting FailureBit.CROSSED_MOVING.
+        Updates `event_mask` in-place by setting FailureBit.COLLISION_AVOIDABLE.
         """
         set_event_bit_inplace(
             event_mask=event_mask,

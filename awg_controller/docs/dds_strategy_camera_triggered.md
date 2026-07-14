@@ -37,7 +37,8 @@ flowchart TD
 The key difference from `DDSPatternStrategy`: instead of
 `trigger.force()` (software), the card waits for a **hardware TTL edge**
 on the `ext0` input. This eliminates all software timing jitter from
-the camera → transport path.
+the camera → transport path. Move pacing still uses the batch travel
+window; `trigger_timer_s` is idle / holding only.
 
 ### External Trigger Configuration
 
@@ -106,11 +107,13 @@ strategy = DDSCameraTriggeredStrategy(config=CameraTriggerConfig(
 ### Using with the Controller
 
 ```python
-from atommovr_controller import atommovrController, HardwareConfig, SoftwareConfig
+from awg_controller.scripts.atommover_controller import (
+    atommovrController, HardwareConfig, SoftwareConfig,
+)
 
 ctrl = atommovrController(
     sw_config=SoftwareConfig(...),
-    hw_config=HardwareConfig(trigger_timer_s=0.2),
+    hw_config=HardwareConfig(trigger_timer_s=0.2),  # idle / holding TIMER
     strategy=DDSCameraTriggeredStrategy(
         config=CameraTriggerConfig(trigger_level_v=1.0)
     ),

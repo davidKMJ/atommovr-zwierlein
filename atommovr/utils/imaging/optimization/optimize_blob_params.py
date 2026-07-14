@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 
 from atommovr.utils.imaging.extraction import BlobDetection
-from atommovr.tests.test_imaging import (
+from atommovr.tests.imaging.test_imaging import (
     _compute_assignment_metrics,
     generate_rot_img,
     setup_blob_params,

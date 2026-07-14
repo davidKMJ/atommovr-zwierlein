@@ -101,7 +101,7 @@ def main():
         ]
 
     fig = BenchmarkingFigure(
-        variables=["Time", "Mean moves", "Parallel move batches", "Success rate"],
+        variables=["Time", "Success rate"],
         figure_type="scale",
     )
     bench = Benchmarking(
@@ -114,17 +114,17 @@ def main():
         n_shots=args.shots,
         n_species=n_species,
         figure_output=fig,
-        per_round_logging=True,
         check_sufficient_atoms=True,
-        show_progress=True,
     )
 
     bench.run(do_ejection=False)
     if args.save:
         bench.save(args.name)
 
-    # Optionally, plot results: comment in if needed
-    bench.plot_results(save=True, savename=f"{args.name}_plot")
+    # Plotting is opt-in: `BenchmarkingFigure`/`Benchmarking.plot_results` is not yet
+    # fully operational (see `BenchmarkingFigure` docstring in `benchmarking.py`).
+    # Uncomment if you need it and are prepared to work around that limitation.
+    # bench.plot_results(save=True, savename=f"{args.name}_plot")
 
 
 if __name__ == "__main__":

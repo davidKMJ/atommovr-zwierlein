@@ -444,18 +444,14 @@ def estimate_grid_rotation_fit_rect(centroids: np.ndarray, plot: bool = False) -
         return centroids @ R.T
 
     def get_min_abs_angle(rect: np.ndarray) -> float:
-        # Get the first edge
         p0 = rect[0]
         p1 = rect[1]
         edge = p1 - p0
 
-        # Calculate angle in degrees
-        # centroids are (y, x), so edge is (dy, dx)
-        # arctan2(dy, dx) gives angle relative to X-axis (horizontal)
+        # centroids are (y, x), so arctan2(dy, dx) gives angle vs the X-axis.
         angle = np.degrees(np.arctan2(edge[0], edge[1]))
 
-        # Map to [-45, 45] to find minimum absolute rotation from an axis
-        # This handles the square grid ambiguity by picking the smallest rotation
+        # Square grids are 90°-ambiguous; fold into [-45, 45] for min rotation.
         min_angle = (angle + 45) % 90 - 45
 
         return -min_angle
@@ -762,7 +758,6 @@ class Extractor:
         - centroids: Nx2 numpy array of (y, x) coordinates of centroids.
         - save_path: Optional path to save the overlaid image. If None, displays the image.
         """
-        # if centroids is not None and n_detected > 0:
         fig, ax = plt.subplots()
         fig.patch.set_alpha(0.0)
         centroids_np = np.asarray(centroids)
@@ -838,7 +833,6 @@ class BlobDetection(Extractor):
 
         H, W = self.shape
 
-        # Convert to grayscale if needed
         if img.ndim == 3:
             img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         else:
@@ -846,22 +840,14 @@ class BlobDetection(Extractor):
 
         img_8bit = self._make_8bit(np.copy(img_gray))
 
-        # Try OpenCV's circle grid detection first (ordered grid)
-        # try:
+        # `ret`/`centroids` are unused: ordered circle-grid detection isn't
+        # reliable enough here, so we always fall through to blob detection
+        # + refinement below.
         ret, centroids = cv2.findCirclesGrid(
             img_8bit, patternSize=(W, H), blobDetector=self.detector
         )
-        # except Exception:
-        #     ret = False
 
-        # if ret:
-        #     self.logger.info("Detected corners using OpenCV findCirclesGrid")
-        #     centroids = centroids.reshape(-1, 2)
-        #     # flip (x,y) -> (y,x)
-        #     centroids = centroids[:, ::-1]
-        #     return centroids, img_gray.shape
-
-        # Fallback: detect blobs and refine
+        # Detect blobs and refine
         keypoints = self.detector.detect(img_8bit)
         if len(keypoints) == 0:
             # return empty centroids rather than raising - upstream code can handle

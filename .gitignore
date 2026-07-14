@@ -28,7 +28,17 @@ figs/
 data/*.pkl
 data/
 
+# Session recorder dumps (camera stages + round JSONL)
+runs/
+
 # .so files
 PPSU2023/libmatching_for_PPSU.so
 PPSU2023/*.o
 PPSU2023/Users/
+
+# Claude Code
+.claude/
+CLAUDE.md
+
+TODO.md
+Ben26.pdf

@@ -179,7 +179,7 @@ def generate_rot_img(
     true_angle: float,
     suffix: Optional[str],
     directory: str = "output",
-) -> Tuple[Tuple[int, int], List[Tuple[int, int]], np.ndarray]:
+) -> Tuple[List[Tuple[int, int]], np.ndarray]:
     """
     Generate a rotated Gaussian grid image and save it.
 

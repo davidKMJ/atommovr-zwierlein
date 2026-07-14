@@ -13,7 +13,7 @@ def calculate_LB(
 ):
     mat_copy = copy.deepcopy(atom_arrays)
     if n_species == 1:
-        mat_copy.reshape([len(mat_copy), len(mat_copy[0]), 1])
+        mat_copy = mat_copy.reshape([len(mat_copy), len(mat_copy[0]), 1])
 
     LBs = []
     for species_ind in range(np.shape(mat_copy)[2]):
@@ -52,8 +52,8 @@ def get_LBAP_pairing(
     mat_copy = copy.deepcopy(atom_arrays)
     targ_copy = copy.deepcopy(target_config)
     if n_species == 1:
-        mat_copy.reshape([len(mat_copy), len(mat_copy[0]), 1])
-        targ_copy.reshape([len(targ_copy), len(targ_copy[0]), 1])
+        mat_copy = mat_copy.reshape([len(mat_copy), len(mat_copy[0]), 1])
+        targ_copy = targ_copy.reshape([len(targ_copy), len(targ_copy[0]), 1])
 
     pairs = []
     for species_ind in range(np.shape(mat_copy)[2]):
@@ -102,8 +102,8 @@ def calculate_Zstar_better(
     mat_copy = copy.deepcopy(atom_arrays)
     targ_copy = copy.deepcopy(target_config)
     if n_species == 1:
-        mat_copy.reshape([len(mat_copy), len(mat_copy[0]), 1])
-        targ_copy.reshape([len(targ_copy), len(targ_copy[0]), 1])
+        mat_copy = mat_copy.reshape([len(mat_copy), len(mat_copy[0]), 1])
+        targ_copy = targ_copy.reshape([len(targ_copy), len(targ_copy[0]), 1])
 
     zstars = []
     for species_ind in range(np.shape(mat_copy)[2]):
@@ -149,7 +149,7 @@ def calculate_Zstar_better(
 def calculate_Zstar(atom_arrays: np.ndarray, target_config: np.ndarray, n_species=1):
     mat_copy = copy.deepcopy(atom_arrays)
     if n_species == 1:
-        mat_copy.reshape([len(mat_copy), len(mat_copy[0]), 1])
+        mat_copy = mat_copy.reshape([len(mat_copy), len(mat_copy[0]), 1])
 
     LBs = []
     zstars = []

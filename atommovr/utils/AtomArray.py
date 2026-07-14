@@ -46,6 +46,7 @@ from atommovr.utils.failure_policy import (
 from atommovr.utils.ErrorModel import ErrorModel
 from atommovr.utils.errormodels import ZeroNoise
 from atommovr.utils.customize import SPECIES1NAME, SPECIES2NAME
+from atommovr.utils.timing import batch_evolution_time_s
 
 
 class AtomArray:
@@ -60,7 +61,7 @@ class AtomArray:
     Parameters
     ----------
     shape : list[int, int], optional
-        Array shape given as ``[n_cols, n_rows]``.
+        Array shape given as ``[n_rows, n_cols]``.
     n_species : int, optional
         Number of atomic species represented in the array. Must be either
         ``1`` or ``2``.
@@ -85,10 +86,10 @@ class AtomArray:
     error_model : ErrorModel
         Error model applied during array operations.
     matrix : NDArray[np.uint8]
-        Occupation matrix of shape ``(n_cols, n_rows, n_species)`` describing
+        Occupation matrix of shape ``(n_rows, n_cols, n_species)`` describing
         the current atom configuration.
     target : NDArray[np.uint8]
-        Target occupation matrix of shape ``(n_cols, n_rows, n_species)``.
+        Target occupation matrix of shape ``(n_rows, n_cols, n_species)``.
     target_Rb : NDArray[np.uint8]
         Single-species target projection for Rb atoms.
     target_Cs : NDArray[np.uint8]
@@ -111,7 +112,7 @@ class AtomArray:
         n_species: int = 1,
         params: PhysicalParams | None = None,
         error_model: ErrorModel | None = None,
-        geom: ArrayGeometry = ArrayGeometry.RECTANGULAR,
+        geom: ArrayGeometry = ArrayGeometry.SQUARE,
     ) -> None:
         self.geom = geom
         if params is None:
@@ -145,7 +146,6 @@ class AtomArray:
             self.target = np.zeros([value[0], value[1], self.n_species], dtype=np.uint8)
             self.target_Rb = np.zeros([value[0], value[1]], dtype=np.uint8)
             self.target_Cs = np.zeros([value[0], value[1]], dtype=np.uint8)
-            # (Optional) run any custom logic here
         # Always delegate to superclass to avoid recursion
         super().__setattr__(key, value)
 
@@ -184,7 +184,7 @@ class AtomArray:
                         random_index = random.randint(0, 1)
                         self.matrix[i][j][random_index] = 0
 
-        self.last_loaded_config = copy.deepcopy(self.matrix)  # can just use .copy()
+        self.last_loaded_config = copy.deepcopy(self.matrix)
 
     def generate_target(
         self,
@@ -537,7 +537,6 @@ class AtomArray:
 
         # -------------------------------------------------------------------------
         # 1) Tagging moves with collisions
-        #    NB: This replaces `_find_and_resolve_crossed_moves` (deprecated)
         # -------------------------------------------------------------------------
         if has_colliding_tones:
             eligible_collision_inevitable, eligible_collision_avoidable = (
@@ -637,14 +636,15 @@ class AtomArray:
             raise ValueError("Atom array cannot have negative occupancy values.")
 
         # -------------------------------------------------------------------------
-        # 8) Find maximum move time and sample from vacuum loss probability dist.
+        # 8) Travel (Chebyshev) + phase overhead → vacuum-loss evolution time.
         # -------------------------------------------------------------------------
-        max_distance = 0
-        for move in move_list:  # moves_wo_crossing
-            dist = move.distance * self.params.spacing
-            if dist > max_distance:
-                max_distance = dist
-        move_time += max_distance / self.params.AOD_speed
+        phase_time_s = move_time  # eligibility-based phases accumulated above
+        move_time = batch_evolution_time_s(
+            move_list,
+            self.params.spacing,
+            self.params.AOD_speed,
+            phase_time_s=phase_time_s,
+        )
         self.matrix, loss_flag = self.error_model.get_atom_loss(
             self.matrix, evolution_time=move_time, n_species=self.n_species
         )
@@ -1066,11 +1066,6 @@ class AtomArray:
         for i in np.where(illegal_mask)[0]:
             moves[i].movetype = MoveType.ILLEGAL_MOVE
 
-        # for mv in moves: # moving this 10 lines above
-        #     mv._update_fail_flag()
-
-        # is_success = np.asarray([mv.is_successful() for mv in moves], dtype=bool)
-        # is_loss = np.asarray([mv.atom_was_lost() for mv in moves], dtype=bool)
         flags_arr = np.asarray([int(mv.fail_flag) for mv in moves], dtype=np.int32)
         movetypes = np.asarray([int(mv.movetype) for mv in moves], dtype=np.int32)
         is_success = flags_arr == int(FailureFlag.SUCCESS)
