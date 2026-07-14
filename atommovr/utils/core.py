@@ -63,7 +63,7 @@ CONFIGURATION_PLOT_LABELS = {
 class PhysicalParams:
     """
     Class used to store various physical parameters corresponding to atom, array and optical tweezer properties.
-    
+
     Parameters
     ----------
     AOD_speed : float, optional
@@ -80,14 +80,14 @@ class PhysicalParams:
     middle_size : list[int], optional
         The desired size of the target (in rows, columns). If none is specified
         it will be automatically calculated.
-    
+
     Attributes
     ----------
         Spacing between adjacent atoms in the square array, in m.
         The probability that a single site will be filled during loading.
         The probability that a site in the target configuration will be occupied.
         The speed of the moving tweezers, in um/us.
-    
+
     Raises
     ------
     ValueError
