@@ -90,7 +90,6 @@ def parallel_LBAP_algorithm_works(
     round_count = 0
 
     while (not complete_flag) and (round_count < round_lim):
-        # print(f"Got here_{round_count}")
         N_independent_moves_path = []
         # 1. Generate the assignments
         prepared_assignments = generate_LBAP_assignments(matrix, target_config)
@@ -228,7 +227,7 @@ def Hungarian_algorithm_works_fast(
     matrix: np.ndarray = atom_arrays.copy()
 
     if final_size is None:
-        final_size = [0, len(matrix[0]) - 1, 0, len(matrix) - 1]
+        final_size = [0, len(matrix) - 1, 0, len(matrix[0]) - 1]
 
     prepared_assignments = generate_assignments_fast(matrix, target_config, final_size)
 
@@ -259,9 +258,9 @@ def Hungarian_algorithm_works(
     move_set = []
     matrix = copy.deepcopy(atom_arrays)
     if final_size is None:
-        final_size = [0, len(matrix[0]) - 1, 0, len(matrix) - 1]
+        final_size = [0, len(matrix) - 1, 0, len(matrix[0]) - 1]
     elif len(final_size) == 0:
-        final_size = [0, len(matrix[0]) - 1, 0, len(matrix) - 1]
+        final_size = [0, len(matrix) - 1, 0, len(matrix[0]) - 1]
 
     # Define target positions for the center square in a matrix.
     current_positions, target_positions = define_current_and_target(
@@ -464,7 +463,7 @@ def generate_assignments_fast(
     Generate Hungarian assignments in the same output format as the original.
     """
     if len(final_size) == 0:
-        final_size = [0, len(matrix[0]) - 1, 0, len(matrix) - 1]
+        final_size = [0, len(matrix) - 1, 0, len(matrix[0]) - 1]
 
     current_positions, target_positions = define_current_and_target_fast(
         matrix,
@@ -499,7 +498,7 @@ def generate_assignments_fast(
 def generate_assignments(matrix, target_config, final_size):
 
     if len(final_size) == 0:
-        final_size = [0, len(matrix[0]) - 1, 0, len(matrix) - 1]
+        final_size = [0, len(matrix) - 1, 0, len(matrix[0]) - 1]
 
     # Define target positions for the center square in a matrix.
     current_positions, target_positions = define_current_and_target(

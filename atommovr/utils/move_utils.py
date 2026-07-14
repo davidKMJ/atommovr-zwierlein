@@ -11,6 +11,7 @@ from atommovr.utils.Move import Move
 from atommovr.utils.ErrorModel import ErrorModel
 from atommovr.utils.errormodels import ZeroNoise
 from atommovr.utils.core import PhysicalParams
+from atommovr.utils.timing import all_phase_duration_s, batch_evolution_time_s
 
 IntArray: TypeAlias = NDArray[np.integer]
 BoolArray: TypeAlias = NDArray[np.bool_]
@@ -286,9 +287,7 @@ def move_atoms(
         raise Exception("Variable `init_matrix` cannot have values outside of {0,1}. ")
 
     # make sure `moves` is a list and not just a singular `Move` object
-    try:
-        moves[0]
-    except TypeError:
+    if isinstance(moves, Move):
         moves = [moves]
 
     if error_modeling:
@@ -333,17 +332,16 @@ def move_atoms(
                 if matrix_out[i, j] > 1:
                     matrix_out[i, j] = 0
 
-    # calculating the time it took the atoms to be moved
-    max_distance = 0
-    for move in moves:
-        dist = (
-            move.distance * params.spacing
-            + (error_model.putdown_time + error_model.pickup_time) * params.AOD_speed
+    # Travel (Chebyshev) + conservative phase overhead for vacuum-loss sampling.
+    if moves:
+        move_time = batch_evolution_time_s(
+            moves,
+            params.spacing,
+            params.AOD_speed,
+            phase_time_s=all_phase_duration_s(error_model),
         )
-        if dist > max_distance:
-            max_distance = dist
-
-        move_time = max_distance / params.AOD_speed
+    else:
+        move_time = 0.0
 
     # evaluating atom loss process from error model
     matrix_out, _ = error_model.get_atom_loss(matrix_out, move_time, n_species=1)
@@ -830,9 +828,7 @@ def move_atoms_noiseless(
     IntArray
         Updated occupancy array with the same shape and dtype as the input.
     """
-    try:
-        moves[0]  # type: ignore[index]
-    except TypeError:
+    if isinstance(moves, Move):
         move_list: list[Move] = [moves]  # type: ignore[list-item]
     else:
         move_list = moves  # type: ignore[assignment]
@@ -909,9 +905,7 @@ def move_atoms_fast(
     if init_matrix.size > 0 and int(np.max(init_matrix)) > 1:
         raise Exception("Variable `init_matrix` cannot have values outside of {0,1}. ")
 
-    try:
-        moves[0]
-    except TypeError:
+    if isinstance(moves, Move):
         moves = [moves]
 
     if error_modeling:
@@ -945,15 +939,15 @@ def move_atoms_fast(
     if matrix_out.size > 0:
         matrix_out[matrix_out > 1] = 0
 
-    max_distance: float = 0.0
-    pickup_putdown_distance: float = (
-        error_model.putdown_time + error_model.pickup_time
-    ) * params.AOD_speed
-    for move in moves:
-        dist: float = move.distance * params.spacing + pickup_putdown_distance
-        if dist > max_distance:
-            max_distance = dist
-        move_time: float = max_distance / params.AOD_speed
+    if moves:
+        move_time: float = batch_evolution_time_s(
+            moves,
+            params.spacing,
+            params.AOD_speed,
+            phase_time_s=all_phase_duration_s(error_model),
+        )
+    else:
+        move_time = 0.0
 
     matrix_out, _ = error_model.get_atom_loss(matrix_out, move_time, n_species=1)
 

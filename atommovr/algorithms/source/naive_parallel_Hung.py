@@ -28,16 +28,15 @@ Utils for pairing atoms and target vacancies.
 def naive_par_Hung(
     rbcs_arrays: AtomArray, do_ejection: bool = False, round_lim: int = 30
 ):
-    # Initialize the variables
     complete_flag = False
     move_list = []
     arrays = copy.deepcopy(rbcs_arrays)
     round_count = 0
 
-    if not check_atom_enough(rbcs_arrays):  # == False: linting error
+    if not check_atom_enough(rbcs_arrays):
         return rbcs_arrays, [], False
 
-    # Rearranging Rb arrays layer
+    # Alternate species each round: assign+move Rb, then Cs, per round.
     while (not complete_flag) and (round_count < round_lim):
         # Here we use deepcopy to ensure that we are not modifying the original arrays
         Rb_arrays = copy.deepcopy(arrays.matrix[:, :, 0])
@@ -185,14 +184,11 @@ def find_smallest_l(matrix, target_config):
 def generate_assignments_naive_par(
     matrix, other_matrix, target_config, other_target_config, used_coord: list = None
 ):
-    # Define target positions for the center square in a matrix.
     current_positions, target_positions, redundant_area = (
         define_current_and_target_naive_par(
             matrix, other_matrix, target_config, other_target_config
         )
     )
-    # print("current", current_positions)
-    # print("target", target_positions)
 
     # If there are no empty targets or sources inside source area, relax target condition
     if len(target_positions) == 0 or len(current_positions) == 0:

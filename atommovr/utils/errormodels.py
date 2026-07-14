@@ -7,6 +7,7 @@ import numpy as np
 from atommovr.utils import Move
 from atommovr.utils.core import atom_loss, atom_loss_dual
 from atommovr.utils.ErrorModel import ErrorModel
+from atommovr.utils.failure_policy import FailureEvent
 
 
 class ZeroNoise(ErrorModel):
@@ -320,7 +321,11 @@ class YbRydbergAODErrorModel(ErrorModel):
                 else:
                     weights = [1.0, 0.0, 0.0]
 
-            failure_flag = random.choices([0, 1, 2], weights=weights, k=1)[0]
-            move.failure_flag = failure_flag
+            fail_event = random.choices(
+                [FailureEvent.SUCCESS, FailureEvent.PICKUP_FAIL, FailureEvent.PUTDOWN_FAIL],
+                weights=weights,
+                k=1,
+            )[0]
+            move.set_failure_event(fail_event)
 
         return moves

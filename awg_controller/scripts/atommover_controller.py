@@ -4,14 +4,13 @@ atommovr Production Controller
 ================================
 Orchestrates the complete atom-rearrangement feedback loop:
 
-  1. Acquire fluorescence image (file or camera callback)
-  2. Blob detection → rotation correction → grid assignment
-  3. Check whether target is already filled  →  done
-  4. Compute rearrangement moves (configurable algorithm)
-  5. Convert moves to RF ramps  (RFConverter / AWGBatch)
-  6. Write ramps to Spectrum Instrumentation DDS card  (spcm)
-  7. Wait for physical move to complete
-  8. Repeat from step 1
+  1. Sync camera → occupancy (``Camera.sync`` / ``detect_occupancy``)
+  2. Check whether target is already filled  →  done
+  3. Compute rearrangement moves (configurable algorithm)
+  4. Convert moves to RF ramps  (RFConverter / AWGBatch)
+  5. Write ramps to Spectrum Instrumentation DDS card  (spcm)
+  6. Offline: advance physics on the controller ``AtomArray``
+  7. Repeat from step 1
 
 Hardware integration is copied verbatim from cli.py (source of truth):
   - DDSCommandQueue for all core updates
@@ -29,51 +28,56 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
-#  repo root on sys.path 
+#  repo root on sys.path
 _REPO_ROOT = str(Path(__file__).resolve().parents[2])
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-#  optional hardware driver 
+#  optional hardware driver
 try:
     import spcm
     from spcm import SpcmException
+
     _HW_AVAILABLE = True
 except ImportError:
-    spcm = None                 # type: ignore[assignment]
-    SpcmException = Exception   # type: ignore[assignment,misc]
+    spcm = None  # type: ignore[assignment]
+    SpcmException = Exception  # type: ignore[assignment,misc]
     _HW_AVAILABLE = False
 
-#  atommovr imports 
 from atommovr.algorithms.single_species import (
-    PCFA, Hungarian, Tetris, BalanceAndCompact,
-    BCv2, ParallelLBAP, ParallelHungarian, GeneralizedBalance,
+    BCv2,
+    BalanceAndCompact,
+    GeneralizedBalance,
+    Hungarian,
+    ParallelHungarian,
+    ParallelLBAP,
+    PCFA,
+    Tetris,
 )
 from atommovr.utils.AtomArray import AtomArray
+from atommovr.utils.ErrorModel import ErrorModel
+from atommovr.utils.core import Configurations, PhysicalParams
+from atommovr.utils.errormodels import ZeroNoise
 from awg_controller.src.awg_control import (
-    AODSettings, AWGBatch,
-    MAX_AMPLITUDE_PCT_PER_CHANNEL, RFConverter, RFRamp,
+    AODSettings,
+    AWGBatch,
+    RFConverter,
     validate_hardware_limits,
 )
-from atommovr.utils.core import Configurations, PhysicalParams
+from awg_controller.src.camera import Camera, OfflineArrayCamera, RealArrayCamera
 from awg_controller.src.dds_strategies import (
     DDSStrategy,
     DDSStreamingStrategy,
     STRATEGY_REGISTRY,
     get_strategy,
 )
-from atommovr.utils.imaging.extraction import (
-    BlobDetection,
-    estimate_grid_rotation_fit_rect,
-    fit_grid_and_assign,
-    inverse_rotate_centroids,
-)
+from awg_controller.src.session_recorder import SessionRecorder, moves_to_records
 
-#  logging 
+#  logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s  %(message)s",
@@ -116,17 +120,12 @@ class HardwareConfig:
 class SoftwareConfig:
     """Algorithm and imaging configuration."""
 
-    #  Imaging 
-    #: Parameters forwarded to BlobDetection (calibrate once per setup).
-    blob_params: Dict[str, Any] = field(default_factory=lambda: {
-        "min_sigma": 1.0, "max_sigma": 5.0, "threshold": 0.05,
-    })
+    #  Imaging
+    #: Optional OpenCV SimpleBlobDetector_Params (or legacy dict — ignored by Camera).
+    blob_params: Any = None
 
-    #  Trap geometry 
-    #: Side length of the full trap grid (L × L sites total).
+    #  Trap geometry (legacy square helpers; AODSettings is authoritative for RF)
     grid_size: int = 10
-
-    #: Side length of the target sub-array (square).
     target_size: int = 6
 
     #: AOD frequency-range and geometry.
@@ -135,27 +134,24 @@ class SoftwareConfig:
     #: Physical parameters (AOD speed, site spacing, loading probability …).
     physical_params: PhysicalParams = field(default_factory=PhysicalParams)
 
-    #  Control loop 
-    #: Maximum rearrangement rounds before giving up.
+    #: Error model applied on the controller-owned ``AtomArray`` (offline physics).
+    error_model: Optional[ErrorModel] = None
+
+    #  Control loop
     max_rounds: int = 10
-
-    #: Algorithm to use (class name as string, e.g. "PCFA").
     algorithm_name: str = "PCFA"
-
-    #: Target pattern type (default: centred square filled block).
     target_type: Configurations = Configurations.MIDDLE_FILL
 
 
-
 _ALGORITHM_REGISTRY = {
-    "PCFA":              PCFA,
-    "Hungarian":         Hungarian,
-    "Tetris":            Tetris,
+    "PCFA": PCFA,
+    "Hungarian": Hungarian,
+    "Tetris": Tetris,
     "BalanceAndCompact": BalanceAndCompact,
-    "BCv2":              BCv2,
-    "ParallelLBAP":      ParallelLBAP,
+    "BCv2": BCv2,
+    "ParallelLBAP": ParallelLBAP,
     "ParallelHungarian": ParallelHungarian,
-    "GeneralizedBalance":GeneralizedBalance,
+    "GeneralizedBalance": GeneralizedBalance,
 }
 
 
@@ -168,29 +164,60 @@ class atommovrController:
         Algorithm, imaging and geometry settings.
     hw_config : HardwareConfig
         Spectrum Instrumentation card settings.
+    camera : Camera, optional
+        Shared ``Camera`` interface (``OfflineArrayCamera`` or
+        ``RealArrayCamera``). Preferred over ``camera_fn``.
     camera_fn : callable, optional
-        ``camera_fn() -> np.ndarray``
-        Called on every acquisition after the first image.  If *None*, the
-        controller uses the internal dummy generator (for simulation / testing).
+        Legacy ``() -> np.ndarray`` grabber; wrapped in ``RealArrayCamera``.
+        Mutually exclusive with ``camera``.
+    recorder : SessionRecorder, optional
+        Stage dumps + round JSONL logger. Owned by the controller and passed
+        into ``Camera.sync`` / ``log_round`` each loop.
     strategy : DDSStrategy or str, optional
-        DDS execution strategy.  Accepts a :class:`DDSStrategy` instance or
-        a string name from :data:`STRATEGY_REGISTRY`
-        (``"streaming"``, ``"ramp"``, ``"pattern"``,
-        ``"camera_triggered"``).  Defaults to ``DDSStreamingStrategy``.
+        DDS execution strategy (``"streaming"``, ``"ramp"``, ``"pattern"``,
+        ``"camera_triggered"``). Defaults to ``DDSStreamingStrategy``.
     """
 
     def __init__(
         self,
         sw_config: SoftwareConfig,
         hw_config: HardwareConfig,
+        camera: Optional[Camera] = None,
         camera_fn: Optional[Callable[[], np.ndarray]] = None,
-        strategy: Optional[DDSStrategy | str] = None,
+        recorder: Optional[SessionRecorder] = None,
+        strategy: Optional[Union[DDSStrategy, str]] = None,
     ) -> None:
-        self.sw   = sw_config
-        self.hw   = hw_config
-        self._cam = camera_fn
+        if camera is not None and camera_fn is not None:
+            raise ValueError("Pass camera= or camera_fn=, not both.")
 
-        # Resolve strategy
+        self.sw = sw_config
+        self.hw = hw_config
+        self.recorder = recorder
+
+        aod = sw_config.aod_settings
+        self.grid_shape: Tuple[int, int] = (int(aod.grid_rows), int(aod.grid_cols))
+
+        if camera is not None:
+            if tuple(camera.grid_shape) != self.grid_shape:
+                raise ValueError(
+                    f"camera.grid_shape {camera.grid_shape} != "
+                    f"AODSettings lattice {self.grid_shape}"
+                )
+            self.camera: Optional[Camera] = camera
+        elif camera_fn is not None:
+            self.camera = RealArrayCamera(
+                self.grid_shape,
+                camera_fn=camera_fn,
+                blob_params=sw_config.blob_params,
+            )
+        else:
+            # Default closed-loop sim camera when nothing is attached.
+            self.camera = OfflineArrayCamera(
+                self.grid_shape,
+                physical_params=sw_config.physical_params,
+                blob_params=sw_config.blob_params,
+            )
+
         if strategy is None:
             self.strategy: DDSStrategy = DDSStreamingStrategy()
         elif isinstance(strategy, str):
@@ -198,35 +225,33 @@ class atommovrController:
         else:
             self.strategy = strategy
 
-        self.algorithm   = _ALGORITHM_REGISTRY[sw_config.algorithm_name]()
-        self.rf_converter = RFConverter(sw_config.aod_settings, sw_config.physical_params)
+        self.algorithm = _ALGORITHM_REGISTRY[sw_config.algorithm_name]()
+        self.rf_converter = RFConverter(aod, sw_config.physical_params)
 
-        # per-card DDS objects  {card_sn: DDS or DDSCommandQueue}
+        err = (
+            sw_config.error_model if sw_config.error_model is not None else ZeroNoise()
+        )
+        self.array = AtomArray(
+            list(self.grid_shape),
+            n_species=1,
+            params=sw_config.physical_params,
+            error_model=err,
+        )
+
         self._dds: Dict[int, Any] = {}
-        self._stack: Any = None         # spcm.CardStack (or None in sim mode)
-
-        self._grid_rotation: float = 0.0   # updated each image acquisition
-        self._target_mask: Optional[np.ndarray] = None  # built on first image
+        self._stack: Any = None
+        self._grid_rotation: float = 0.0
+        self._target_mask: Optional[np.ndarray] = None
+        self._apply_target()
 
         self._initialize_hardware()
 
+    # ------------------------------------------------------------------
+    # Hardware
+    # ------------------------------------------------------------------
 
     def _initialize_hardware(self) -> None:
-        """Open cards, configure DDS, pre-fill buffer, enable trigger.
-
-        Delegates strategy-specific logic (DDS type, trigger mode,
-        pre-fill, start) to ``self.strategy``.
-
-        Common setup order (invariant across strategies)::
-
-            1. card_mode(SPC_REP_STD_DDS)
-            2. Create Channels → enable, set amp, output load
-            3. card.write_setup()  — activates clock signals
-            4. strategy.create_dds(card, channels)
-            5. strategy.configure(dds, card, hw_config, core_map)
-            6. strategy.prefill(dds, holding_batch, hw_config)
-            7. strategy.start(stack)
-        """
+        """Open cards, configure DDS, pre-fill buffer, enable trigger."""
         if not _HW_AVAILABLE:
             log.info(
                 f"Simulation mode: hardware init skipped "
@@ -234,7 +259,6 @@ class atommovrController:
             )
             return
 
-        # Validate grid dimensions against hardware core limits
         validate_hardware_limits(
             self.sw.aod_settings.grid_rows,
             self.sw.aod_settings.grid_cols,
@@ -247,11 +271,7 @@ class atommovrController:
 
             for card in self._stack.cards:
                 sn = card.sn()
-
-                # 1. Set DDS card mode
                 card.card_mode(spcm.SPC_REP_STD_DDS)
-
-                # 2. Enable both output channels (V-AOD + H-AOD)
                 channels = spcm.Channels(
                     card=card,
                     card_enable=spcm.CHANNEL0 | spcm.CHANNEL1,
@@ -259,22 +279,15 @@ class atommovrController:
                 channels.enable(True)
                 channels.amp(self.hw.max_amplitude_v * spcm.units.V)
                 channels.output_load(self.hw.output_load_ohms * spcm.units.ohm)
-
-                # 3. Activate card clock (MUST come after channel config)
                 card.write_setup()
 
-                # 4-6. Strategy-specific DDS creation + configuration
                 dds = self.strategy.create_dds(card, channels)
                 self.strategy.configure(dds, card, self.hw, core_map)
                 self.strategy.prefill(dds, holding, self.hw)
-
                 self._dds[sn] = dds
 
-            # 7. Start (strategy decides flags)
             self.strategy.start(self._stack)
-            log.info(
-                f"Hardware initialised (strategy={self.strategy.name})."
-            )
+            log.info(f"Hardware initialised (strategy={self.strategy.name}).")
 
         except SpcmException as exc:
             log.error(f"spcm error during init: {exc}")
@@ -286,10 +299,7 @@ class atommovrController:
             raise
 
     def _output_batch(self, batch: AWGBatch) -> None:
-        """Send one ``AWGBatch`` to all open cards via the active strategy.
-
-        Simulation mode logs the batch parameters instead of touching hardware.
-        """
+        """Send one ``AWGBatch`` to all open cards via the active strategy."""
         if not _HW_AVAILABLE or self._stack is None:
             log.info(
                 f"[SIM:{self.strategy.name}] batch: {len(batch.ramps)} ramps, "
@@ -300,7 +310,7 @@ class atommovrController:
             return
 
         for card in self._stack.cards:
-            sn  = card.sn()
+            sn = card.sn()
             dds = self._dds[sn]
             self.strategy.execute_batch(dds, batch)
 
@@ -310,203 +320,236 @@ class atommovrController:
 
         if not _HW_AVAILABLE or self._stack is None:
             log.info(
-                f"[SIM:{self.strategy.name}] holding: "
-                f"{len(holding.ramps)} ramps"
+                f"[SIM:{self.strategy.name}] holding: " f"{len(holding.ramps)} ramps"
             )
             return
 
         for card in self._stack.cards:
-            sn  = card.sn()
+            sn = card.sn()
             dds = self._dds[sn]
             self.strategy.send_holding(dds, holding)
 
+    # ------------------------------------------------------------------
+    # Imaging / targets
+    # ------------------------------------------------------------------
 
-    def _acquire(self, path: Optional[str] = None) -> np.ndarray:
-        """Return a grayscale image array.
+    def _ensure_camera(self) -> Camera:
+        """Return the active camera, creating an offline default if needed."""
+        if self.camera is not None:
+            return self.camera
+        self.camera = OfflineArrayCamera(
+            self.grid_shape,
+            physical_params=self.sw.physical_params,
+            blob_params=self.sw.blob_params,
+        )
+        log.info(
+            "No camera provided — using OfflineArrayCamera "
+            f"on {self.grid_shape[0]}×{self.grid_shape[1]}."
+        )
+        return self.camera
 
-        Priority:
-        1. ``path`` (first image from disk)
-        2. ``self._cam()`` (real camera callback)
-        3. Dummy random image (simulation / testing)
-        """
-        if path and Path(path).exists():
-            import cv2  # soft-import: only needed for disk images
-            img = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
-            if img is None:
-                raise OSError(f"cv2 could not read image at '{path}'")
-            return img
+    def _acquire(self) -> np.ndarray:
+        """Return a grayscale frame (Camera.acquire / legacy dummy)."""
+        if self.camera is not None:
+            return self.camera.acquire()
 
-        if self._cam is not None:
-            return self._cam()
-
-        # Dummy: random fluorescence image for off-hardware testing
+        # Legacy dummy for unit tests that call _acquire() with no camera.
         rng = np.random.default_rng()
         grid = self.sw.grid_size
-        img  = np.zeros((512, 512), dtype=np.uint8)
-        # Sprinkle bright blobs at grid positions
-        step = 512 // grid
+        img = np.zeros((512, 512), dtype=np.uint8)
+        step = max(512 // max(grid, 1), 1)
         for r in range(grid):
             for c in range(grid):
                 if rng.random() < self.sw.physical_params.loading_prob:
                     cy, cx = r * step + step // 2, c * step + step // 2
-                    img[max(0, cy-2):cy+3, max(0, cx-2):cx+3] = 200
+                    img[max(0, cy - 2) : cy + 3, max(0, cx - 2) : cx + 3] = 200
         log.debug("Dummy image generated (simulation mode).")
         return img
 
-
-    def _process_image(self, image: np.ndarray) -> np.ndarray:
-        """Blob detect → rotation correct → grid assign → binary matrix.
-
-        Returns
-        -------
-        np.ndarray, shape (grid_size, grid_size), dtype int
-            Binary occupancy matrix (1 = atom present, 0 = empty).
-        """
-        t0 = time.perf_counter()
-
-        # 1. Blob detection
-        blobs = BlobDetection(self.sw.blob_params).detect(image)
-        if len(blobs) == 0:
-            log.warning("No blobs detected - returning empty occupancy matrix.")
-            return np.zeros((self.sw.grid_size, self.sw.grid_size), dtype=int)
-
-        centroids = np.array([[b.x, b.y] for b in blobs], dtype=float)
-
-        # 2. Rotation estimation (fit_rect per project conventions)
-        rotation = estimate_grid_rotation_fit_rect(blobs)
-        self._grid_rotation = rotation
-
-        # 3. Inverse-rotate centroids into an axis-aligned frame
-        if abs(rotation) > 0.01:
-            centroids = inverse_rotate_centroids(
-                centroids, image_shape=image.shape[:2], angle_deg=rotation
-            )
-
-        # 4. Assign centroids to the closest grid sites
-        binary = fit_grid_and_assign(
-            centroids,
-            (self.sw.grid_size, self.sw.grid_size),
-            image_shape=image.shape[:2],
-        )
-
-        dt_ms = (time.perf_counter() - t0) * 1e3
-        log.debug(
-            f"Image processed in {dt_ms:.1f} ms: "
-            f"{int(binary.sum())} atoms on {self.sw.grid_size}×{self.sw.grid_size} grid, "
-            f"rotation={rotation:.2f}°"
-        )
-        return binary
-
     def _build_target_mask(self, grid_shape: Tuple[int, int]) -> np.ndarray:
-        """Create a centred square target mask of side ``target_size``."""
+        """Centred rectangular target from middle_size / AOD / target_size."""
         rows, cols = grid_shape
-        t = self.sw.target_size
+        ms = self.sw.physical_params.middle_size
+        if ms is not None and len(ms) >= 2:
+            tr, tc = int(ms[0]), int(ms[1])
+        else:
+            tr = int(self.sw.aod_settings.target_rows or self.sw.target_size)
+            tc = int(self.sw.aod_settings.target_cols or self.sw.target_size)
+
+        tr = min(max(tr, 1), rows)
+        tc = min(max(tc, 1), cols)
         mask = np.zeros((rows, cols), dtype=int)
-        r0 = max((rows - t) // 2, 0)
-        c0 = max((cols - t) // 2, 0)
-        t_r = min(t, rows - r0)
-        t_c = min(t, cols - c0)
-        mask[r0:r0 + t_r, c0:c0 + t_c] = 1
+        r0 = max((rows - tr) // 2, 0)
+        c0 = max((cols - tc) // 2, 0)
+        mask[r0 : r0 + tr, c0 : c0 + tc] = 1
         return mask
 
-    def run(self, initial_image: Optional[str] = None) -> bool:
-        """Execute the rearrangement feedback loop.
+    def _apply_target(self) -> np.ndarray:
+        """Build / cache target mask and copy it onto ``self.array.target``."""
+        if self._target_mask is None:
+            ms = self.sw.physical_params.middle_size
+            if ms is not None and len(ms) >= 2:
+                self.array.generate_target(self.sw.target_type, middle_size=list(ms))
+                self._target_mask = (self.array.target[:, :, 0] > 0).astype(int)
+            else:
+                self._target_mask = self._build_target_mask(self.grid_shape)
+                self.array.target[:, :, 0] = self._target_mask
+        else:
+            self.array.target[:, :, 0] = self._target_mask
+        return self._target_mask
 
-        Parameters
-        ----------
-        initial_image : str, optional
-            Path to a fluorescence image for the first acquisition round.
-            Subsequent rounds use ``camera_fn`` or the dummy generator.
+    # ------------------------------------------------------------------
+    # Main loop
+    # ------------------------------------------------------------------
+
+    def run(self) -> bool:
+        """Execute the rearrangement feedback loop.
 
         Returns
         -------
         bool
-            ``True`` if the target is successfully filled within
-            ``max_rounds``, ``False`` otherwise.
+            ``True`` if the target is successfully filled within ``max_rounds``.
         """
+        cam = self._ensure_camera()
+        recorder = self.recorder
+
         log.info(
             f"Loop start — algorithm={self.sw.algorithm_name}, "
-            f"target={self.sw.target_size}×{self.sw.target_size}, "
-            f"max_rounds={self.sw.max_rounds}"
+            f"grid={self.grid_shape[0]}×{self.grid_shape[1]}, "
+            f"max_rounds={self.sw.max_rounds}, camera={type(cam).__name__}"
         )
 
-        image_path = initial_image  # used only for round 0
+        try:
+            for r in range(self.sw.max_rounds + 1):
+                t_loop = time.perf_counter()
+                if recorder is not None:
+                    recorder.begin_round(r)
 
-        for r in range(self.sw.max_rounds + 1):
-            t_loop = time.perf_counter()
+                # 1. Acquire + detect into the global array
+                try:
+                    cam.sync(self.array, recorder=recorder)
+                except Exception as exc:
+                    log.error(f"Round {r}: acquisition failed - {exc}")
+                    return False
 
-            #  1. Acquire 
-            try:
-                img = self._acquire(image_path)
-                image_path = None   # subsequent rounds use camera / dummy
-            except Exception as exc:
-                log.error(f"Round {r}: acquisition failed - {exc}")
-                return False
+                self._grid_rotation = float(getattr(cam, "grid_rotation", 0.0) or 0.0)
+                state = (self.array.matrix[:, :, 0] > 0).astype(int)
+                target = self._apply_target()
 
-            #  2. Process 
-            state = self._process_image(img)
+                filled = int((state * target).sum())
+                need = int(target.sum())
+                atoms = int(state.sum())
 
-            #  3. Build target mask (once) 
-            if self._target_mask is None:
-                self._target_mask = self._build_target_mask(state.shape)
+                # 2. Success?
+                if filled == need:
+                    log.info(f"SUCCESS - target filled after {r} round(s).")
+                    if recorder is not None:
+                        recorder.log_round(
+                            atoms=atoms,
+                            filled=filled,
+                            need=need,
+                            n_moves=0,
+                            success=True,
+                        )
+                    return True
 
-            #  4. Check success 
-            target = self._target_mask
-            if np.array_equal(state * target, target):
-                log.info(f"SUCCESS - target filled after {r} round(s).")
-                return True
+                if r == self.sw.max_rounds:
+                    log.warning(
+                        f"Max rounds ({self.sw.max_rounds}) reached; "
+                        f"{need - filled} target sites remain empty."
+                    )
+                    if recorder is not None:
+                        recorder.log_round(
+                            atoms=atoms,
+                            filled=filled,
+                            need=need,
+                            n_moves=0,
+                            success=False,
+                        )
+                    break
 
-            if r == self.sw.max_rounds:
-                log.warning(
-                    f"Max rounds ({self.sw.max_rounds}) reached; "
-                    f"{int((target - state * target).clip(0).sum())} sites remain empty."
+                if atoms < need:
+                    log.error(
+                        f"Round {r}: insufficient atoms "
+                        f"(have {atoms}, need {need}). Aborting."
+                    )
+                    if recorder is not None:
+                        recorder.log_round(
+                            atoms=atoms,
+                            filled=filled,
+                            need=need,
+                            n_moves=0,
+                            aborted="insufficient_atoms",
+                        )
+                    return False
+
+                # 3. Algorithm
+                try:
+                    _, move_batches, algo_ok = self.algorithm.get_moves(self.array)
+                except Exception as exc:
+                    log.exception(f"Round {r}: algorithm raised - {exc}")
+                    return False
+
+                if not algo_ok:
+                    log.error(f"Round {r}: algorithm reported failure.")
+                    if recorder is not None:
+                        recorder.log_round(
+                            atoms=atoms,
+                            filled=filled,
+                            need=need,
+                            n_moves=0,
+                            aborted="algo_fail",
+                        )
+                    return False
+
+                # 4. RF + hardware
+                rf_batches = self.rf_converter.convert_sequence(move_batches)
+                n_moves = sum(len(b) for b in move_batches)
+                log.info(
+                    f"Round {r}: {n_moves} moves → {len(rf_batches)} hardware batches."
                 )
-                break
 
-            #  5. Build AtomArray for algorithm 
-            arr = AtomArray(list(state.shape), n_species=1,
-                            params=self.sw.physical_params)
-            arr.matrix[:, :, 0] = state
-            arr.target[:, :, 0] = target
+                for batch in rf_batches:
+                    self._output_batch(batch)
+                self._send_holding()
 
-            if int(state.sum()) < int(target.sum()):
-                log.error(
-                    f"Round {r}: insufficient atoms "
-                    f"(have {int(state.sum())}, need {int(target.sum())}). Aborting."
-                )
-                return False
+                # 5. Offline physics on the controller-owned array
+                if isinstance(cam, OfflineArrayCamera):
+                    self.array.evaluate_moves(move_batches)
 
-            #  6. Compute moves 
-            try:
-                _, move_batches, algo_ok = self.algorithm.get_moves(arr)
-            except Exception as exc:
-                log.exception(f"Round {r}: algorithm raised - {exc}")
-                return False
+                if recorder is not None:
+                    recorder.log_round(
+                        atoms=atoms,
+                        filled=filled,
+                        need=need,
+                        n_moves=n_moves,
+                        n_parallel_batches=len(move_batches),
+                        n_rf_batches=len(rf_batches),
+                        rf_duration_s=float(
+                            sum(b.total_duration_s for b in rf_batches)
+                        ),
+                        moves=moves_to_records(move_batches),
+                    )
 
-            if not algo_ok:
-                log.error(f"Round {r}: algorithm reported failure.")
-                return False
+                elapsed_ms = (time.perf_counter() - t_loop) * 1e3
+                log.info(f"Round {r} done in {elapsed_ms:.1f} ms.")
 
-            #  7. Convert & drive hardware 
-            rf_batches = self.rf_converter.convert_sequence(move_batches)
-            log.info(f"Round {r}: {len(rf_batches)} hardware batches.")
+            return False
+        finally:
+            if recorder is not None:
+                written = recorder.finalize()
+                if written:
+                    log.info(
+                        "Recorder GIFs: "
+                        + ", ".join(f"{k}→{p.name}" for k, p in written.items())
+                    )
 
-            for b_idx, batch in enumerate(rf_batches):
-                self._output_batch(batch)
-
-            # Restore static holding config after the whole sequence
-            self._send_holding()
-
-            elapsed_ms = (time.perf_counter() - t_loop) * 1e3
-            log.info(f"Round {r} done in {elapsed_ms:.1f} ms.")
-
-        return False
-
+    # ------------------------------------------------------------------
     # Shutdown
+    # ------------------------------------------------------------------
 
     def _close_stack(self) -> None:
         if self._stack is not None:
-            # Strategy-specific cleanup per card
             for card in self._stack.cards:
                 sn = card.sn()
                 dds = self._dds.get(sn)
@@ -524,7 +567,6 @@ class atommovrController:
         self._close_stack()
         log.info(f"Controller shut down (strategy={self.strategy.name}).")
 
-    #  context manager support 
     def __enter__(self):
         return self
 
@@ -532,33 +574,54 @@ class atommovrController:
         self.shutdown()
 
 
-# CLI entry-point
-
 def main() -> None:
     import argparse
 
     p = argparse.ArgumentParser(
         description="atommovr production controller — image → AOD feedback loop."
     )
-    p.add_argument("--image",      default=None,   help="Path to initial fluorescence image")
-    p.add_argument("--algorithm",  default="PCFA",
-                   choices=list(_ALGORITHM_REGISTRY), help="Rearrangement algorithm")
-    p.add_argument("--grid-rows",  type=int, default=10, help="Grid rows (V-AOD tones, max 16 w/ 2ch)")
-    p.add_argument("--grid-cols",  type=int, default=5,  help="Grid cols (H-AOD tones, max 5)")
-    p.add_argument("--target-rows",type=int, default=6,  help="Target sub-array rows")
-    p.add_argument("--target-cols",type=int, default=5,  help="Target sub-array cols")
-    p.add_argument("--max-rounds", type=int, default=10, help="Max rearrangement rounds")
-    p.add_argument("--card",       action="append", default=["/dev/spcm0"],
-                   help="Card device path (repeat for multiple cards)")
-    p.add_argument("--trg-timer",  type=float, default=0.2,
-                   help="Trigger timer interval (s), sets move window")
-    p.add_argument("--f-min-v",    type=float, default=60e6, help="V-AOD f_min (Hz)")
-    p.add_argument("--f-max-v",    type=float, default=100e6, help="V-AOD f_max (Hz)")
-    p.add_argument("--f-min-h",    type=float, default=60e6, help="H-AOD f_min (Hz)")
-    p.add_argument("--f-max-h",    type=float, default=100e6, help="H-AOD f_max (Hz)")
-    p.add_argument("--strategy",   default="streaming",
-                   choices=list(STRATEGY_REGISTRY),
-                   help="DDS execution strategy")
+    p.add_argument(
+        "--algorithm",
+        default="PCFA",
+        choices=list(_ALGORITHM_REGISTRY),
+        help="Rearrangement algorithm",
+    )
+    p.add_argument(
+        "--grid-rows",
+        type=int,
+        default=10,
+        help="Grid rows (V-AOD tones, max 16 w/ 2ch)",
+    )
+    p.add_argument(
+        "--grid-cols", type=int, default=5, help="Grid cols (H-AOD tones, max 5)"
+    )
+    p.add_argument("--target-rows", type=int, default=6, help="Target sub-array rows")
+    p.add_argument("--target-cols", type=int, default=5, help="Target sub-array cols")
+    p.add_argument(
+        "--max-rounds", type=int, default=10, help="Max rearrangement rounds"
+    )
+    p.add_argument(
+        "--card",
+        action="append",
+        default=["/dev/spcm0"],
+        help="Card device path (repeat for multiple cards)",
+    )
+    p.add_argument(
+        "--trg-timer",
+        type=float,
+        default=0.2,
+        help="Trigger timer interval (s), sets move window",
+    )
+    p.add_argument("--f-min-v", type=float, default=60e6, help="V-AOD f_min (Hz)")
+    p.add_argument("--f-max-v", type=float, default=100e6, help="V-AOD f_max (Hz)")
+    p.add_argument("--f-min-h", type=float, default=60e6, help="H-AOD f_min (Hz)")
+    p.add_argument("--f-max-h", type=float, default=100e6, help="H-AOD f_max (Hz)")
+    p.add_argument(
+        "--strategy",
+        default="streaming",
+        choices=list(STRATEGY_REGISTRY),
+        help="DDS execution strategy",
+    )
     args = p.parse_args()
 
     hw = HardwareConfig(
@@ -570,17 +633,24 @@ def main() -> None:
         target_size=min(args.target_rows, args.target_cols),
         algorithm_name=args.algorithm,
         max_rounds=args.max_rounds,
+        physical_params=PhysicalParams(
+            middle_size=[args.target_rows, args.target_cols],
+        ),
         aod_settings=AODSettings(
-            f_min_v=args.f_min_v, f_max_v=args.f_max_v,
-            f_min_h=args.f_min_h, f_max_h=args.f_max_h,
-            grid_rows=args.grid_rows, grid_cols=args.grid_cols,
-            target_rows=args.target_rows, target_cols=args.target_cols,
+            f_min_v=args.f_min_v,
+            f_max_v=args.f_max_v,
+            f_min_h=args.f_min_h,
+            f_max_h=args.f_max_h,
+            grid_rows=args.grid_rows,
+            grid_cols=args.grid_cols,
+            target_rows=args.target_rows,
+            target_cols=args.target_cols,
         ),
     )
 
     with atommovrController(sw, hw, strategy=args.strategy) as ctrl:
         try:
-            success = ctrl.run(initial_image=args.image)
+            success = ctrl.run()
             sys.exit(0 if success else 1)
         except KeyboardInterrupt:
             log.info("Interrupted by user.")

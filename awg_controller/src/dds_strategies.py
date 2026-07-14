@@ -18,6 +18,14 @@ Strategies
    ``trigger.force()`` for fully hardware-synchronised feedback
    (spcm examples 09 + 15).
 
+Timing
+------
+Move pacing is governed by **travel** —
+`AWGBatch.total_duration_s` from `atommovr.utils.timing.travel_duration_s`
+(Chebyshev × spacing / `AOD_speed`).
+
+`HardwareConfig.trigger_timer_s` is the idle / holding TIMER only.
+
 Safety
 ------
 * **Maximum output voltage MUST stay below 2.0 V** in all scripts.
@@ -31,7 +39,7 @@ import abc
 import logging
 import math
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -40,6 +48,7 @@ if TYPE_CHECKING:
 # Optional hardware driver (same guard as atommovr_controller.py)
 try:
     import spcm
+
     _HW_AVAILABLE = True
 except ImportError:
     spcm = None  # type: ignore[assignment]
@@ -49,8 +58,66 @@ log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Transport timing (single authority: AWGBatch.total_duration_s / AOD_speed)
+# ---------------------------------------------------------------------------
+
+#: Idle-buffer target time used when sizing FIFO prefill writes.
+PREFILL_BUFFER_S: float = 10.0
+
+#: Cap on prefill writes so µs-scale idle timers cannot explode the queue.
+PREFILL_MAX_COUNT: int = 64
+
+#: Floor applied only to the prefill-count divisor (not to move duration).
+PREFILL_MIN_TIMER_S: float = 1e-3
+
+
+def transport_duration_s(batch: Any) -> float:
+    """Return the **travel** window for *batch* (seconds).
+
+    This is ``AWGBatch.total_duration_s`` from
+    :func:`atommovr.utils.timing.travel_duration_s` (Chebyshev × spacing /
+    ``AOD_speed``).  Holding batches return ``0.0``.
+    """
+    return max(float(getattr(batch, "total_duration_s", 0.0) or 0.0), 0.0)
+
+
+def wait_transport(duration_s: float, already_waited_s: float = 0.0) -> None:
+    """Sleep the remaining transport window after hardware work.
+
+    Parameters
+    ----------
+    duration_s :
+        Authoritative physics duration from :func:`transport_duration_s`.
+    already_waited_s :
+        Wall time already spent (e.g. pattern poll).  Only the remainder
+        is slept so abrupt strategies never under-wait relative to
+        ``AOD_speed``.
+    """
+    remaining = float(duration_s) - max(float(already_waited_s), 0.0)
+    if remaining > 0.0:
+        time.sleep(remaining)
+
+
+def prefill_count_for_timer(timer_s: float) -> int:
+    """Number of idle holding writes used to pre-fill the DDS FIFO.
+
+    Uses a fixed ~``PREFILL_BUFFER_S`` seconds of *idle* ticks, clamped so
+    short timers cannot request hundreds of thousands of writes.  Move
+    pacing itself is **not** derived from this value.
+    """
+    t = max(float(timer_s), PREFILL_MIN_TIMER_S)
+    return max(1, min(PREFILL_MAX_COUNT, math.floor(PREFILL_BUFFER_S / t)))
+
+
+def program_timer(dds: Any, interval_s: float) -> None:
+    """Program the card TIMER period used for the next trigger events."""
+    dds.trg_timer(float(interval_s))
+
+
+# ---------------------------------------------------------------------------
 # Configuration data-classes
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class RampConfig:
@@ -68,6 +135,7 @@ class RampConfig:
     scurve_segments : int
         Number of linear segments that approximate the S-curve.
         More segments → smoother profile, but more DDS commands.
+        Segment duration is ``transport_duration_s / scurve_segments``.
     """
 
     ramp_stepsize: int = 1000
@@ -85,6 +153,7 @@ class PatternConfig:
         Sleep between ``queue_cmd_count()`` polls (seconds).
     poll_timeout_s : float
         Maximum wait before declaring a pattern execution timeout.
+        Safety ceiling only — transport pacing uses ``AOD_speed``.
     """
 
     poll_interval_s: float = 0.001
@@ -114,6 +183,9 @@ class CameraTriggerConfig:
         Sleep between ``queue_cmd_count()`` polls.
     poll_timeout_s : float
         Maximum wait for camera trigger + pattern completion.
+        Camera frame rate is independent of ``AOD_speed``; this is only
+        a safety timeout.  After the pattern completes, any remaining
+        transport window is still slept.
     """
 
     trigger_level_v: float = 1.5
@@ -152,12 +224,18 @@ def _group_ramps_by_channel(batch: Any) -> Dict[int, list]:
 # Abstract base class
 # ---------------------------------------------------------------------------
 
+
 class DDSStrategy(abc.ABC):
     """Interface that every DDS execution strategy must implement.
 
     The :class:`atommovrController` delegates all hardware-specific DDS
     logic to a ``DDSStrategy`` instance, making the paradigm swappable
     without touching the control-loop code.
+
+    **Timing contract**: move pacing is governed by
+    ``AWGBatch.total_duration_s`` (from ``AOD_speed``).
+    ``HardwareConfig.trigger_timer_s`` is the *idle / holding* TIMER
+    only, used at configure/prefill and restored after each move batch.
 
     Life-cycle (called by the controller)::
 
@@ -172,6 +250,9 @@ class DDSStrategy(abc.ABC):
         strategy.finalize_sequence(dds)
         strategy.shutdown(dds, card)
     """
+
+    #: Idle / holding TIMER period (s).  Set in :meth:`configure`.
+    _idle_timer_s: float = 0.2
 
     # -- identity ----------------------------------------------------------
 
@@ -224,11 +305,21 @@ class DDSStrategy(abc.ABC):
 
     # -- utilities ---------------------------------------------------------
 
+    def _store_idle_timer(self, hw_config: Any) -> float:
+        """Cache and return the idle TIMER from *hw_config*."""
+        self._idle_timer_s = float(hw_config.trigger_timer_s)
+        return self._idle_timer_s
+
+    def _restore_idle_timer(self, dds: Any) -> None:
+        """Re-program the card TIMER to the idle / holding period."""
+        program_timer(dds, self._idle_timer_s)
+
     @staticmethod
     def compute_slope(ramp: Any) -> float:
         """Compute the linear frequency slope (Hz / s) for *ramp*.
 
-        Returns 0.0 for static ramps (no motion or zero duration).
+        Uses ``ramp.duration_s`` (physics / ``AOD_speed``).  Returns 0.0
+        for static ramps (no motion or zero duration).
         """
         if ramp.duration_s <= 0 or ramp.f_start == ramp.f_end:
             return 0.0
@@ -239,6 +330,7 @@ class DDSStrategy(abc.ABC):
 # Strategy 1 - Streaming (current production approach)
 # =========================================================================
 
+
 class DDSStreamingStrategy(DDSStrategy):
     """FIFO streaming with ``DDSCommandQueue`` and ``TIMER`` trigger.
 
@@ -247,6 +339,11 @@ class DDSStreamingStrategy(DDSStrategy):
 
     **Paradigm**: ``DDSCommandQueue`` + ``SPCM_DDS_TRG_SRC_TIMER``
     + FIFO pre-fill + continuous ``write_to_card()`` calls.
+
+    **Timing**: for each move batch the card TIMER is set to
+    ``batch.total_duration_s`` (from ``AOD_speed``), the hop is queued,
+    and the host waits that same duration.  Idle/holding uses
+    ``HardwareConfig.trigger_timer_s``.
 
     Advantages
         * Simple command model (set freq → exec_at_trg → write).
@@ -271,7 +368,10 @@ class DDSStreamingStrategy(DDSStrategy):
         return dds
 
     def configure(
-        self, dds: Any, card: Any, hw_config: Any,
+        self,
+        dds: Any,
+        card: Any,
+        hw_config: Any,
         core_map: Dict[int, List[int]],
     ) -> None:
         ch1_cores = core_map[1]
@@ -280,11 +380,12 @@ class DDSStreamingStrategy(DDSStrategy):
         else:
             dds.cores_on_channel(1, *[_core_const(c) for c in ch1_cores])
 
+        idle_s = self._store_idle_timer(hw_config)
         dds.trg_src(spcm.SPCM_DDS_TRG_SRC_TIMER)
-        dds.trg_timer(hw_config.trigger_timer_s)
+        program_timer(dds, idle_s)
 
     def prefill(self, dds: Any, holding_batch: Any, hw_config: Any) -> None:
-        count = max(1, math.floor(10.0 / hw_config.trigger_timer_s))
+        count = prefill_count_for_timer(hw_config.trigger_timer_s)
         for _ in range(count):
             self._write_batch(dds, holding_batch)
             dds.exec_at_trg()
@@ -300,6 +401,10 @@ class DDSStreamingStrategy(DDSStrategy):
     # -- execution ---------------------------------------------------------
 
     def execute_batch(self, dds: Any, batch: Any) -> None:
+        duration_s = transport_duration_s(batch)
+        if duration_s > 0:
+            program_timer(dds, duration_s)
+
         self._write_batch(dds, batch)
         dds.exec_at_trg()
         dds.write_to_card()
@@ -307,10 +412,12 @@ class DDSStreamingStrategy(DDSStrategy):
         if dds.status() & spcm.SPCM_DDS_STAT_QUEUE_UNDERRUN:
             log.warning("DDS queue underrun detected (streaming strategy)!")
 
-        if batch.total_duration_s > 0:
-            time.sleep(batch.total_duration_s)
+        wait_transport(duration_s)
+        if duration_s > 0:
+            self._restore_idle_timer(dds)
 
     def send_holding(self, dds: Any, batch: Any) -> None:
+        self._restore_idle_timer(dds)
         self.execute_batch(dds, batch)
 
     # -- internal ----------------------------------------------------------
@@ -331,6 +438,7 @@ class DDSStreamingStrategy(DDSStrategy):
 # Strategy 2 - Hardware Frequency Ramps
 # =========================================================================
 
+
 class DDSRampStrategy(DDSStrategy):
     """FPGA-level frequency ramps via ``frequency_slope()``.
 
@@ -349,14 +457,15 @@ class DDSRampStrategy(DDSStrategy):
         Trigger 2 → activate frequency_slope on each core  (ramp starts)
         Trigger 3 → frequency_slope(0) + set exact final freq  (ramp stops)
 
-    The ramp runs between triggers 2 and 3 — exactly one trigger-timer
-    interval.  The slope is::
+    The ramp runs between triggers 2 and 3 for exactly
+    ``batch.total_duration_s`` (from ``AOD_speed``).  The slope is::
 
-        slope = (f_end - f_start) / trigger_timer_s
+        slope = (f_end - f_start) / total_duration_s
 
     **S-curve support** (example 12):  When ``RampConfig.use_scurve`` is
     *True*, the linear ramp is replaced with a piecewise-linear cosine
-    profile for minimum-jerk transport.
+    profile.  Each segment lasts ``total_duration_s / n_segments``; slope
+    math uses the same ``T = total_duration_s``.
 
     Advantages
         * Smooth frequency transitions (no abrupt hops).
@@ -364,8 +473,8 @@ class DDSRampStrategy(DDSStrategy):
         * Optional S-curve for jerk-free transport.
 
     Limitations
-        * Fixed ramp duration = ``trigger_timer_s`` for every move.
-        * 3 trigger events per batch (vs. 1 for streaming).
+        * 3 trigger events per batch (vs. 1 for streaming); host wait is
+          ``3 × duration`` (linear) or ``(n_seg+2) × segment_dt`` (S-curve).
         * More DDS commands (especially with S-curve segments).
 
     Parameters
@@ -375,7 +484,6 @@ class DDSRampStrategy(DDSStrategy):
 
     def __init__(self, config: Optional[RampConfig] = None) -> None:
         self.config = config or RampConfig()
-        self._trigger_timer_s: float = 0.2  # updated in configure()
 
     @property
     def name(self) -> str:
@@ -390,7 +498,10 @@ class DDSRampStrategy(DDSStrategy):
         return dds
 
     def configure(
-        self, dds: Any, card: Any, hw_config: Any,
+        self,
+        dds: Any,
+        card: Any,
+        hw_config: Any,
         core_map: Dict[int, List[int]],
     ) -> None:
         ch1_cores = core_map[1]
@@ -399,15 +510,15 @@ class DDSRampStrategy(DDSStrategy):
         else:
             dds.cores_on_channel(1, *[_core_const(c) for c in ch1_cores])
 
+        idle_s = self._store_idle_timer(hw_config)
         dds.trg_src(spcm.SPCM_DDS_TRG_SRC_TIMER)
-        dds.trg_timer(hw_config.trigger_timer_s)
-        self._trigger_timer_s = hw_config.trigger_timer_s
+        program_timer(dds, idle_s)
 
         # Ramp step-size: how many clock cycles between FPGA freq updates
         dds.freq_ramp_stepsize(self.config.ramp_stepsize)
 
     def prefill(self, dds: Any, holding_batch: Any, hw_config: Any) -> None:
-        count = max(1, math.floor(10.0 / hw_config.trigger_timer_s))
+        count = prefill_count_for_timer(hw_config.trigger_timer_s)
         for _ in range(count):
             for ramp in holding_batch.ramps:
                 dds[ramp.core].freq(float(ramp.f_end))
@@ -430,7 +541,7 @@ class DDSRampStrategy(DDSStrategy):
         if not batch.ramps:
             return
 
-        if batch.total_duration_s <= 0:
+        if transport_duration_s(batch) <= 0:
             self.send_holding(dds, batch)
             return
 
@@ -441,6 +552,7 @@ class DDSRampStrategy(DDSStrategy):
 
     def send_holding(self, dds: Any, batch: Any) -> None:
         """Set static frequencies with zero slopes."""
+        self._restore_idle_timer(dds)
         for ramp in batch.ramps:
             dds[ramp.core].freq(float(ramp.f_end))
             dds[ramp.core].phase(ramp.phase_deg * spcm.units.deg)
@@ -453,7 +565,8 @@ class DDSRampStrategy(DDSStrategy):
 
     def _execute_linear(self, dds: Any, batch: Any) -> None:
         """Three-trigger linear ramp (spcm examples 03 / 04)."""
-        timer_s = self._trigger_timer_s
+        duration_s = transport_duration_s(batch)
+        program_timer(dds, duration_s)
 
         # Trigger 1 — initial frequencies + amplitudes
         for ramp in batch.ramps:
@@ -462,9 +575,9 @@ class DDSRampStrategy(DDSStrategy):
             dds[ramp.core].amp(ramp.amplitude_pct * spcm.units.percent)
         dds.exec_at_trg()
 
-        # Trigger 2 — start ramps
+        # Trigger 2 — start ramps (slope spans one transport window)
         for ramp in batch.ramps:
-            slope = self._slope_for_timer(ramp, timer_s)
+            slope = self._slope_for_duration(ramp, duration_s)
             dds[ramp.core].frequency_slope(slope)
         dds.exec_at_trg()
 
@@ -476,19 +589,22 @@ class DDSRampStrategy(DDSStrategy):
 
         dds.write_to_card()
 
-        # Wait for all 3 trigger intervals
-        time.sleep(timer_s * 3)
+        # Wait for all 3 trigger intervals (middle one is the transport)
+        time.sleep(duration_s * 3)
+        self._restore_idle_timer(dds)
 
     # -- S-curve ramp (example 12) -----------------------------------------
 
     def _execute_scurve(self, dds: Any, batch: Any) -> None:
         """Piecewise-linear cosine S-curve (spcm example 12)."""
         n_seg = self.config.scurve_segments
-        timer_s = self._trigger_timer_s
+        duration_s = transport_duration_s(batch)
+        segment_dt = duration_s / n_seg
+        program_timer(dds, segment_dt)
 
-        # Pre-compute per-core segment slopes
+        # Pre-compute per-core segment slopes over the same T = duration_s
         all_slopes: List[List[float]] = [
-            self._compute_scurve_slopes(ramp, n_seg)
+            self._compute_scurve_slopes(ramp, n_seg, duration_s=duration_s)
             for ramp in batch.ramps
         ]
 
@@ -499,7 +615,7 @@ class DDSRampStrategy(DDSStrategy):
             dds[ramp.core].amp(ramp.amplitude_pct * spcm.units.percent)
         dds.exec_at_trg()
 
-        # Steps 2 … N+1 — piecewise slopes
+        # Steps 2 … N+1 — piecewise slopes (N × segment_dt = duration_s)
         for seg_idx in range(n_seg):
             for ramp_idx, ramp in enumerate(batch.ramps):
                 dds[ramp.core].frequency_slope(all_slopes[ramp_idx][seg_idx])
@@ -515,20 +631,28 @@ class DDSRampStrategy(DDSStrategy):
 
         # Total trigger events: 1 (init) + n_seg (slopes) + 1 (final)
         total_triggers = 1 + n_seg + 1
-        time.sleep(timer_s * total_triggers)
+        time.sleep(segment_dt * total_triggers)
+        self._restore_idle_timer(dds)
 
     # -- slope helpers -----------------------------------------------------
 
     @staticmethod
-    def _slope_for_timer(ramp: Any, timer_s: float) -> float:
-        """Compute slope so the ramp covers ``delta_f`` in one timer interval."""
+    def _slope_for_duration(ramp: Any, duration_s: float) -> float:
+        """Compute slope so the ramp covers ``delta_f`` in *duration_s*."""
         delta_f = ramp.f_end - ramp.f_start
-        if abs(delta_f) < 1e-3 or timer_s <= 0:
+        if abs(delta_f) < 1e-3 or duration_s <= 0:
             return 0.0
-        return delta_f / timer_s
+        return delta_f / duration_s
+
+    # Back-compat alias used by older tests / callers
+    _slope_for_timer = _slope_for_duration
 
     @staticmethod
-    def _compute_scurve_slopes(ramp: Any, n_segments: int) -> List[float]:
+    def _compute_scurve_slopes(
+        ramp: Any,
+        n_segments: int,
+        duration_s: Optional[float] = None,
+    ) -> List[float]:
         """Piecewise-linear slopes for a cosine S-curve profile.
 
         The raised-cosine position profile is::
@@ -536,15 +660,16 @@ class DDSRampStrategy(DDSStrategy):
             f(t) = f_start + Δf · (1 − cos(π · t / T)) / 2
 
         Its derivative gives the instantaneous slope at each segment
-        midpoint.  The result approximates minimum-jerk transport.
+        midpoint.  ``T`` and each segment's wall-clock length must agree:
+        ``T = duration_s``, ``dt = T / n_segments``.
 
         Based on spcm example 12.
         """
         delta_f = ramp.f_end - ramp.f_start
-        if abs(delta_f) < 1e-3 or ramp.duration_s <= 0:
+        T = float(duration_s) if duration_s is not None else float(ramp.duration_s)
+        if abs(delta_f) < 1e-3 or T <= 0:
             return [0.0] * n_segments
 
-        T = ramp.duration_s
         slopes: List[float] = []
         for i in range(n_segments):
             t_mid = (i + 0.5) * T / n_segments
@@ -557,6 +682,7 @@ class DDSRampStrategy(DDSStrategy):
 # Strategy 3 - Pattern-Based
 # =========================================================================
 
+
 class DDSPatternStrategy(DDSStrategy):
     """Pre-loaded patterns with ``CARD`` trigger synchronisation.
 
@@ -567,6 +693,10 @@ class DDSPatternStrategy(DDSStrategy):
     a final ``CARD`` trigger acts as a pause / sync point.
     ``trigger.force()`` starts each pattern, and ``queue_cmd_count()``
     is polled for completion.
+
+    **Timing**: inter-step TIMER is set to ``batch.total_duration_s``.
+    After the pattern queue drains, any remaining transport window is
+    slept so the host never under-waits relative to ``AOD_speed``.
 
     **Paradigm**: ``spcm.DDS`` + ``TRG_SRC_TIMER`` during steps
     + ``TRG_SRC_CARD`` at end + ``trigger.force()`` + polling.
@@ -580,6 +710,7 @@ class DDSPatternStrategy(DDSStrategy):
         5.  write_to_card()
         6.  trigger.force()                         ← start pattern
         7.  poll queue_cmd_count() until 0           ← wait
+        8.  sleep remaining transport window
 
     Advantages
         * No FIFO underrun risk (pattern is pre-loaded).
@@ -614,7 +745,10 @@ class DDSPatternStrategy(DDSStrategy):
         return dds
 
     def configure(
-        self, dds: Any, card: Any, hw_config: Any,
+        self,
+        dds: Any,
+        card: Any,
+        hw_config: Any,
         core_map: Dict[int, List[int]],
     ) -> None:
         ch1_cores = core_map[1]
@@ -623,8 +757,9 @@ class DDSPatternStrategy(DDSStrategy):
         else:
             dds.cores_on_channel(1, *[_core_const(c) for c in ch1_cores])
 
+        idle_s = self._store_idle_timer(hw_config)
         dds.trg_src(spcm.SPCM_DDS_TRG_SRC_TIMER)
-        dds.trg_timer(hw_config.trigger_timer_s)
+        program_timer(dds, idle_s)
 
         # Disable all external trigger sources — use force() only
         self._trigger = spcm.Trigger(card)
@@ -651,8 +786,14 @@ class DDSPatternStrategy(DDSStrategy):
         if not batch.ramps:
             return
 
+        duration_s = transport_duration_s(batch)
+        if duration_s > 0:
+            program_timer(dds, duration_s)
+
         # TIMER for inter-step pacing
         dds.trg_src(spcm.SPCM_DDS_TRG_SRC_TIMER)
+
+        t0 = time.monotonic()
 
         # Load initial frequencies
         for ramp in batch.ramps:
@@ -675,10 +816,14 @@ class DDSPatternStrategy(DDSStrategy):
         if self._trigger is not None:
             self._trigger.force()
 
-        # Wait for completion
+        # Wait for completion, then any remaining AOD_speed window
         self._poll_completion(dds)
+        wait_transport(duration_s, already_waited_s=time.monotonic() - t0)
+        if duration_s > 0:
+            self._restore_idle_timer(dds)
 
     def send_holding(self, dds: Any, batch: Any) -> None:
+        self._restore_idle_timer(dds)
         dds.trg_src(spcm.SPCM_DDS_TRG_SRC_TIMER)
 
         for ramp in batch.ramps:
@@ -717,6 +862,7 @@ class DDSPatternStrategy(DDSStrategy):
 # Strategy 4 - Camera-Triggered Pattern Execution
 # =========================================================================
 
+
 class DDSCameraTriggeredStrategy(DDSStrategy):
     """External camera TTL triggers pattern execution.
 
@@ -729,6 +875,10 @@ class DDSCameraTriggeredStrategy(DDSStrategy):
     feedback loop::
 
         camera exposure → TTL pulse → AWG pattern start → AOD → atoms
+
+    **Timing**: RF inter-step TIMER follows ``batch.total_duration_s``.
+    The camera TTL period is *not* derived from ``AOD_speed``.  After the
+    pattern queue drains, any remaining transport window is slept.
 
     .. danger::
 
@@ -744,6 +894,7 @@ class DDSCameraTriggeredStrategy(DDSStrategy):
         4.  write_to_card()
         5.  (hardware waits for ext0 TTL edge)
         6.  poll queue_cmd_count() until 0
+        7.  sleep remaining transport window
 
     Advantages
         * Fully hardware-synchronised (zero software jitter).
@@ -786,7 +937,10 @@ class DDSCameraTriggeredStrategy(DDSStrategy):
         return dds
 
     def configure(
-        self, dds: Any, card: Any, hw_config: Any,
+        self,
+        dds: Any,
+        card: Any,
+        hw_config: Any,
         core_map: Dict[int, List[int]],
     ) -> None:
         ch1_cores = core_map[1]
@@ -795,8 +949,9 @@ class DDSCameraTriggeredStrategy(DDSStrategy):
         else:
             dds.cores_on_channel(1, *[_core_const(c) for c in ch1_cores])
 
+        idle_s = self._store_idle_timer(hw_config)
         dds.trg_src(spcm.SPCM_DDS_TRG_SRC_TIMER)
-        dds.trg_timer(hw_config.trigger_timer_s)
+        program_timer(dds, idle_s)
 
         # --- external trigger from camera (spcm example 09) ---
         self._trigger = spcm.Trigger(card)
@@ -808,9 +963,7 @@ class DDSCameraTriggeredStrategy(DDSStrategy):
             self._trigger.ext0_mode(spcm.SPC_TM_NEG)
 
         # SAFETY: level must be < 2.0 V (enforced in __init__)
-        self._trigger.ext0_level0(
-            self.config.trigger_level_v * spcm.units.V
-        )
+        self._trigger.ext0_level0(self.config.trigger_level_v * spcm.units.V)
 
         if self.config.trigger_coupling == "DC":
             self._trigger.ext0_coupling(spcm.COUPLING_DC)
@@ -846,8 +999,14 @@ class DDSCameraTriggeredStrategy(DDSStrategy):
         if not batch.ramps:
             return
 
+        duration_s = transport_duration_s(batch)
+        if duration_s > 0:
+            program_timer(dds, duration_s)
+
         # TIMER for inter-step pacing
         dds.trg_src(spcm.SPCM_DDS_TRG_SRC_TIMER)
+
+        t0 = time.monotonic()
 
         # Load initial frequencies
         for ramp in batch.ramps:
@@ -869,9 +1028,13 @@ class DDSCameraTriggeredStrategy(DDSStrategy):
 
         # No force trigger — ext0 TTL will start execution
         self._poll_completion(dds)
+        wait_transport(duration_s, already_waited_s=time.monotonic() - t0)
+        if duration_s > 0:
+            self._restore_idle_timer(dds)
 
     def send_holding(self, dds: Any, batch: Any) -> None:
         """Send holding config.  Uses force-trigger (no camera event expected)."""
+        self._restore_idle_timer(dds)
         dds.trg_src(spcm.SPCM_DDS_TRG_SRC_TIMER)
 
         for ramp in batch.ramps:
@@ -952,6 +1115,7 @@ def get_strategy(name: str, **kwargs: Any) -> DDSStrategy:
     }
 
     cls = STRATEGY_REGISTRY[name]
-    if kwargs and name in _CONFIG_MAP:
-        return cls(config=_CONFIG_MAP[name](**kwargs))
+    if name in _CONFIG_MAP and kwargs:
+        config = _CONFIG_MAP[name](**kwargs)
+        return cls(config=config)
     return cls()

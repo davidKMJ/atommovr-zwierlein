@@ -26,9 +26,7 @@ if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
 # Path to controller scripts
-_SCRIPTS_DIR = os.path.join(
-    os.path.dirname(__file__), "..", "scripts"
-)
+_SCRIPTS_DIR = os.path.join(os.path.dirname(__file__), "..", "scripts")
 
 from atommovr.algorithms.single_species import (
     BCv2,
@@ -42,21 +40,8 @@ from atommovr.algorithms.single_species import (
 )
 from atommovr.utils.AtomArray import AtomArray
 from atommovr.utils.Move import Move
-from awg_controller.src.awg_control import (
-    ALL_CHANNEL_0_CORES,
-    AWGBatch,
-    CHANNEL_0_EXCLUSIVE_CORES,
-    CHANNEL_1_FULL_CORES,
-    CHANNEL_1_SINGLE_CORE,
-    CHANNEL_CORE_MAP,
-    MAX_AMPLITUDE_PCT_PER_CHANNEL,
-    AODSettings,
-    RFConverter,
-    RFRamp,
-    compute_core_assignments,
-    validate_hardware_limits,
-)
 from atommovr.utils.core import Configurations, PhysicalParams
+from awg_controller.src.offline_camera import OfflineArrayCamera
 from awg_controller.src.dds_strategies import (
     MAX_SAFE_TRIGGER_LEVEL_V,
     CameraTriggerConfig,
@@ -66,15 +51,35 @@ from awg_controller.src.dds_strategies import (
     DDSStrategy,
     DDSStreamingStrategy,
     PatternConfig,
+    PREFILL_MAX_COUNT,
     RampConfig,
     STRATEGY_REGISTRY,
     get_strategy,
+    prefill_count_for_timer,
+    transport_duration_s,
+    wait_transport,
     _group_ramps_by_channel,
+)
+from awg_controller.src.awg_control import (
+    ALL_CHANNEL_0_CORES,
+    AWGBatch,
+    CHANNEL_0_EXCLUSIVE_CORES,
+    CHANNEL_1_FULL_CORES,
+    CHANNEL_1_SINGLE_CORE,
+    CHANNEL_CORE_MAP,
+    MAX_AMPLITUDE_PCT_PER_CHANNEL,
+    MIN_MOVE_DURATION_S,
+    AODSettings,
+    RFConverter,
+    RFRamp,
+    compute_core_assignments,
+    validate_hardware_limits,
 )
 
 # ---------------------------------------------------------------------------
 # Shared helpers (mirrors test_algorithms.py style)
 # ---------------------------------------------------------------------------
+
 
 def _centered_target_mask(
     array_shape: tuple[int, int],
@@ -129,8 +134,6 @@ def _build_array_with_target(
 def _make_simple_settings(
     grid_rows: int = 10,
     grid_cols: int = 5,
-    target_rows: int = 6,
-    target_cols: int = 5,
 ) -> AODSettings:
     return AODSettings(
         f_min_v=60e6,
@@ -139,14 +142,13 @@ def _make_simple_settings(
         f_max_h=100e6,
         grid_rows=grid_rows,
         grid_cols=grid_cols,
-        target_rows=target_rows,
-        target_cols=target_cols,
     )
 
 
 # =====================================================================
 # 1. Core assignment tests
 # =====================================================================
+
 
 class TestCoreAssignments:
     """Verify that compute_core_assignments mirrors cli.py configure_cores."""
@@ -196,14 +198,13 @@ class TestCoreAssignments:
         for n_col in [1, 3, 5]:
             mapping = compute_core_assignments(n_row_tones=10, n_col_tones=n_col)
             overlap = set(mapping[0]) & set(mapping[1])
-            assert overlap == set(), (
-                f"Core overlap {overlap} at n_col={n_col}"
-            )
+            assert overlap == set(), f"Core overlap {overlap} at n_col={n_col}"
 
 
 # =====================================================================
 # 2. RFConverter unit tests
 # =====================================================================
+
 
 class TestRFConverter:
     """Verify frequency mapping, amplitude budgets, and batch structure."""
@@ -215,7 +216,7 @@ class TestRFConverter:
 
     @pytest.fixture
     def converter_4x3(self) -> RFConverter:
-        settings = _make_simple_settings(grid_rows=4, grid_cols=3, target_rows=2, target_cols=2)
+        settings = _make_simple_settings(grid_rows=4, grid_cols=3)
         return RFConverter(settings, PhysicalParams())
 
     # -- frequency mapping --
@@ -266,9 +267,9 @@ class TestRFConverter:
         batch = converter_10x5.holding_config()
         core_map = converter_10x5.core_map
         for ramp in batch.ramps:
-            assert ramp.core in core_map[ramp.channel], (
-                f"Core {ramp.core} not in ch{ramp.channel} map {core_map[ramp.channel]}"
-            )
+            assert (
+                ramp.core in core_map[ramp.channel]
+            ), f"Core {ramp.core} not in ch{ramp.channel} map {core_map[ramp.channel]}"
 
     # -- convert_moves --
 
@@ -303,9 +304,9 @@ class TestRFConverter:
         batch = converter_4x3.convert_moves([move])
         for ramp in batch.ramps:
             if ramp.channel == 0 and ramp.core != converter_4x3.core_map[0][0]:
-                assert ramp.f_start == ramp.f_end, (
-                    f"Non-moving ch0 core {ramp.core} changed frequency"
-                )
+                assert (
+                    ramp.f_start == ramp.f_end
+                ), f"Non-moving ch0 core {ramp.core} changed frequency"
 
     def test_amplitude_budget_during_moves(self, converter_4x3: RFConverter):
         """Amplitude sum per channel must be exactly 40% during moves."""
@@ -341,11 +342,13 @@ class TestRFConverter:
             converter_4x3.convert_moves([move])
 
     def test_convert_sequence(self, converter_4x3: RFConverter):
-        batches = converter_4x3.convert_sequence([
-            [Move(0, 0, 1, 1)],
-            [Move(2, 2, 3, 0)],
-            [],
-        ])
+        batches = converter_4x3.convert_sequence(
+            [
+                [Move(0, 0, 1, 1)],
+                [Move(2, 2, 3, 0)],
+                [],
+            ]
+        )
         assert len(batches) == 3
         assert batches[0].total_duration_s > 0
         assert batches[1].total_duration_s > 0
@@ -365,6 +368,7 @@ class TestRFConverter:
 # 3. Move duration tests
 # =====================================================================
 
+
 class TestMoveDuration:
     """Verify that move duration is computed from Chebyshev distance."""
 
@@ -374,13 +378,28 @@ class TestMoveDuration:
         params = PhysicalParams()
         return RFConverter(settings, params)
 
-    def test_diagonal_move_chebyshev(self, converter: RFConverter):
-        """A (2,3) move should use Chebyshev dist = max(2,3) = 3."""
+    def test_converter_matches_shared_travel_duration(self, converter: RFConverter):
+        """RFConverter travel must equal atommovr.utils.timing.travel_duration_s."""
+        from atommovr.utils.timing import travel_duration_s
+
         move = Move(0, 0, 2, 3)
         dur = converter._move_duration_s([move])
-        expected_dist = 3 * converter.params.spacing
-        expected_dur = expected_dist / converter.params.AOD_speed
-        assert dur == pytest.approx(max(expected_dur, 1e-6))
+        expected = travel_duration_s(
+            [move], converter.params.spacing, converter.params.AOD_speed
+        )
+        assert dur == pytest.approx(expected)
+
+    def test_diagonal_move_chebyshev(self, converter: RFConverter):
+        """A (2,3) move should use Chebyshev dist = max(2,3) = 3."""
+        from atommovr.utils.timing import travel_duration_s
+
+        move = Move(0, 0, 2, 3)
+        dur = converter._move_duration_s([move])
+        assert dur == pytest.approx(
+            travel_duration_s(
+                [move], converter.params.spacing, converter.params.AOD_speed
+            )
+        )
 
     def test_empty_moves_zero_duration(self, converter: RFConverter):
         assert converter._move_duration_s([]) == 0.0
@@ -399,10 +418,10 @@ class TestMoveDuration:
 # =====================================================================
 
 PIPELINE_CASES = [
-    {"name": "Hungarian",     "cls": Hungarian,     "target_size": 4},
-    {"name": "PCFA",          "cls": PCFA,          "target_size": 4},
-    {"name": "BCv2",          "cls": BCv2,          "target_size": 4},
-    {"name": "Tetris",        "cls": Tetris,        "target_size": 4},
+    {"name": "Hungarian", "cls": Hungarian, "target_size": 4},
+    {"name": "PCFA", "cls": PCFA, "target_size": 4},
+    {"name": "BCv2", "cls": BCv2, "target_size": 4},
+    {"name": "Tetris", "cls": Tetris, "target_size": 4},
     {"name": "BalanceAndCompact", "cls": BalanceAndCompact, "target_size": 4},
 ]
 
@@ -416,10 +435,7 @@ class TestAlgorithmToRFPipeline:
         target_size = case["target_size"]
         grid_rows, grid_cols = target_size + 2, target_size + 2
 
-        settings = _make_simple_settings(
-            grid_rows=grid_rows, grid_cols=grid_cols,
-            target_rows=target_size, target_cols=target_size,
-        )
+        settings = _make_simple_settings(grid_rows=grid_rows, grid_cols=grid_cols)
         converter = RFConverter(settings, PhysicalParams())
         arr = _build_array_with_target(grid_rows, grid_cols, target_size, target_size)
 
@@ -431,22 +447,19 @@ class TestAlgorithmToRFPipeline:
         for i, batch in enumerate(rf_batches):
             ch0 = sum(r.amplitude_pct for r in batch.ramps if r.channel == 0)
             ch1 = sum(r.amplitude_pct for r in batch.ramps if r.channel == 1)
-            assert ch0 == pytest.approx(MAX_AMPLITUDE_PCT_PER_CHANNEL, abs=0.01), (
-                f"Batch {i}: ch0 amp {ch0:.2f}% != {MAX_AMPLITUDE_PCT_PER_CHANNEL}%"
-            )
-            assert ch1 == pytest.approx(MAX_AMPLITUDE_PCT_PER_CHANNEL, abs=0.01), (
-                f"Batch {i}: ch1 amp {ch1:.2f}% != {MAX_AMPLITUDE_PCT_PER_CHANNEL}%"
-            )
+            assert ch0 == pytest.approx(
+                MAX_AMPLITUDE_PCT_PER_CHANNEL, abs=0.01
+            ), f"Batch {i}: ch0 amp {ch0:.2f}% != {MAX_AMPLITUDE_PCT_PER_CHANNEL}%"
+            assert ch1 == pytest.approx(
+                MAX_AMPLITUDE_PCT_PER_CHANNEL, abs=0.01
+            ), f"Batch {i}: ch1 amp {ch1:.2f}% != {MAX_AMPLITUDE_PCT_PER_CHANNEL}%"
 
     def test_all_ramps_use_valid_cores(self, case):
         """Every ramp core index must belong to its channel's assignment."""
         target_size = case["target_size"]
         grid_rows, grid_cols = target_size + 2, target_size + 2
 
-        settings = _make_simple_settings(
-            grid_rows=grid_rows, grid_cols=grid_cols,
-            target_rows=target_size, target_cols=target_size,
-        )
+        settings = _make_simple_settings(grid_rows=grid_rows, grid_cols=grid_cols)
         converter = RFConverter(settings, PhysicalParams())
         core_map = converter.core_map
         arr = _build_array_with_target(grid_rows, grid_cols, target_size, target_size)
@@ -458,19 +471,16 @@ class TestAlgorithmToRFPipeline:
         rf_batches = converter.convert_sequence(move_batches)
         for batch in rf_batches:
             for ramp in batch.ramps:
-                assert ramp.core in core_map[ramp.channel], (
-                    f"Core {ramp.core} not in ch{ramp.channel} map"
-                )
+                assert (
+                    ramp.core in core_map[ramp.channel]
+                ), f"Core {ramp.core} not in ch{ramp.channel} map"
 
     def test_ramp_count_covers_full_grid(self, case):
         """Each batch must emit exactly grid_rows + grid_cols ramps."""
         target_size = case["target_size"]
         grid_rows, grid_cols = target_size + 2, target_size + 2
 
-        settings = _make_simple_settings(
-            grid_rows=grid_rows, grid_cols=grid_cols,
-            target_rows=target_size, target_cols=target_size,
-        )
+        settings = _make_simple_settings(grid_rows=grid_rows, grid_cols=grid_cols)
         converter = RFConverter(settings, PhysicalParams())
         arr = _build_array_with_target(grid_rows, grid_cols, target_size, target_size)
 
@@ -487,10 +497,7 @@ class TestAlgorithmToRFPipeline:
         target_size = case["target_size"]
         grid_rows, grid_cols = target_size + 2, target_size + 2
 
-        settings = _make_simple_settings(
-            grid_rows=grid_rows, grid_cols=grid_cols,
-            target_rows=target_size, target_cols=target_size,
-        )
+        settings = _make_simple_settings(grid_rows=grid_rows, grid_cols=grid_cols)
         converter = RFConverter(settings, PhysicalParams())
         arr = _build_array_with_target(grid_rows, grid_cols, target_size, target_size)
 
@@ -502,18 +509,19 @@ class TestAlgorithmToRFPipeline:
         for batch in rf_batches:
             for ramp in batch.ramps:
                 if ramp.channel == 0:
-                    assert settings.f_min_v <= ramp.f_end <= settings.f_max_v, (
-                        f"V-AOD freq {ramp.f_end/1e6:.2f} MHz OOB"
-                    )
+                    assert (
+                        settings.f_min_v <= ramp.f_end <= settings.f_max_v
+                    ), f"V-AOD freq {ramp.f_end/1e6:.2f} MHz OOB"
                 else:
-                    assert settings.f_min_h <= ramp.f_end <= settings.f_max_h, (
-                        f"H-AOD freq {ramp.f_end/1e6:.2f} MHz OOB"
-                    )
+                    assert (
+                        settings.f_min_h <= ramp.f_end <= settings.f_max_h
+                    ), f"H-AOD freq {ramp.f_end/1e6:.2f} MHz OOB"
 
 
 # =====================================================================
 # 5. Controller simulation tests (no spcm hardware)
 # =====================================================================
+
 
 class TestControllerSimulation:
     """Test the atommovrController in simulation mode (spcm unavailable)."""
@@ -532,13 +540,10 @@ class TestControllerSimulation:
         )
 
         sw = SoftwareConfig(
-            grid_size=8,
-            target_size=4,
-            algorithm_name="PCFA",
+            physical_params=PhysicalParams(middle_size=[4, 3]),
+            algorithm_name="Hungarian",
             max_rounds=3,
-            aod_settings=_make_simple_settings(
-                grid_rows=8, grid_cols=5, target_rows=4, target_cols=4,
-            ),
+            aod_settings=_make_simple_settings(grid_rows=8, grid_cols=5),
         )
         hw = HardwareConfig()
         ctrl = atommovrController(sw, hw)
@@ -551,16 +556,45 @@ class TestControllerSimulation:
         assert 0 in controller.rf_converter.core_map
         assert 1 in controller.rf_converter.core_map
 
-    def test_controller_build_target_mask(self, controller):
-        mask = controller._build_target_mask((8, 8))
-        assert mask.shape == (8, 8)
-        assert mask.sum() == 16  # 4×4 target
+    def test_controller_global_array_target(self, controller):
+        """Target is built once at construction onto the global AtomArray."""
+        mask = (controller.array.target[:, :, 0] > 0).astype(int)
+        assert mask.shape == (8, 5)
+        assert mask.sum() == 12  # 4×3 middle fill
+
+    def test_controller_target_zebra_via_target_type(self):
+        """Target pattern is resolved once at construction from target_type."""
+        sys.path.insert(0, _SCRIPTS_DIR)
+        from atommovr_controller import (
+            atommovrController,
+            HardwareConfig,
+            SoftwareConfig,
+        )
+
+        sw = SoftwareConfig(
+            physical_params=PhysicalParams(middle_size=[4, 3]),
+            algorithm_name="Hungarian",
+            target_type=Configurations.ZEBRA_HORIZONTAL,
+            aod_settings=_make_simple_settings(grid_rows=8, grid_cols=5),
+        )
+        hw = HardwareConfig()
+        ctrl = atommovrController(sw, hw)
+        mask = (ctrl.array.target[:, :, 0] > 0).astype(int)
+        assert mask.shape == (8, 5)
+        assert np.array_equal(mask[0], np.ones(5, dtype=int))
+        assert np.array_equal(mask[1], np.zeros(5, dtype=int))
+        assert mask.sum() == 20
+        ctrl.shutdown()
 
     def test_controller_acquire_dummy(self, controller):
         img = controller._acquire()
         assert isinstance(img, np.ndarray)
         assert img.ndim == 2
-        assert img.shape == (512, 512)
+        # Default OfflineArrayCamera uses Alvium-like 624×816 (may grow with grid)
+        assert img.shape[0] >= 624
+        assert img.shape[1] >= 816
+        assert isinstance(controller.camera, OfflineArrayCamera)
+        assert controller.camera.occupancy is not None
 
     def test_controller_output_batch_simulation(self, controller):
         """_output_batch in sim mode should not raise."""
@@ -582,6 +616,7 @@ class TestControllerSimulation:
 # 6. AODSettings validation tests
 # =====================================================================
 
+
 class TestAODSettings:
 
     def test_frequency_spacing_single_site(self):
@@ -599,10 +634,15 @@ class TestAODSettings:
         with pytest.raises(ValueError):
             s.validate_core_limits()
 
+    def test_fov_um_from_um_per_mhz(self):
+        s = AODSettings(f_min_v=84.5e6, f_max_v=120.5e6, um_per_mhz=6.526)
+        assert s.fov_um_v == pytest.approx(6.526 * 36.0, rel=1e-3)
+
 
 # =====================================================================
 # 7. RFRamp / AWGBatch data class tests
 # =====================================================================
+
 
 class TestDataClasses:
 
@@ -624,6 +664,7 @@ class TestDataClasses:
 # =====================================================================
 # 8. Edge-case tests
 # =====================================================================
+
 
 class TestEdgeCases:
 
@@ -682,6 +723,7 @@ class TestEdgeCases:
 # 9. DDS strategy interface tests
 # =====================================================================
 
+
 class TestDDSStrategyInterface:
     """Verify that all strategies implement the required interface."""
 
@@ -701,8 +743,13 @@ class TestDDSStrategyInterface:
 
     def test_strategy_has_required_methods(self, strategy):
         for method in [
-            "create_dds", "configure", "prefill", "start",
-            "execute_batch", "send_holding", "finalize_sequence",
+            "create_dds",
+            "configure",
+            "prefill",
+            "start",
+            "execute_batch",
+            "send_holding",
+            "finalize_sequence",
             "shutdown",
         ]:
             assert hasattr(strategy, method), f"Missing method: {method}"
@@ -710,18 +757,36 @@ class TestDDSStrategyInterface:
 
     def test_compute_slope_static(self, strategy):
         """Static ramp (no motion) should yield zero slope."""
-        ramp = RFRamp(channel=0, core=0, f_start=80e6, f_end=80e6,
-                       amplitude_pct=4.0, duration_s=0.1)
+        ramp = RFRamp(
+            channel=0,
+            core=0,
+            f_start=80e6,
+            f_end=80e6,
+            amplitude_pct=4.0,
+            duration_s=0.1,
+        )
         assert strategy.compute_slope(ramp) == 0.0
 
     def test_compute_slope_zero_duration(self, strategy):
-        ramp = RFRamp(channel=0, core=0, f_start=60e6, f_end=80e6,
-                       amplitude_pct=4.0, duration_s=0.0)
+        ramp = RFRamp(
+            channel=0,
+            core=0,
+            f_start=60e6,
+            f_end=80e6,
+            amplitude_pct=4.0,
+            duration_s=0.0,
+        )
         assert strategy.compute_slope(ramp) == 0.0
 
     def test_compute_slope_positive(self, strategy):
-        ramp = RFRamp(channel=0, core=0, f_start=60e6, f_end=80e6,
-                       amplitude_pct=4.0, duration_s=0.5)
+        ramp = RFRamp(
+            channel=0,
+            core=0,
+            f_start=60e6,
+            f_end=80e6,
+            amplitude_pct=4.0,
+            duration_s=0.5,
+        )
         slope = strategy.compute_slope(ramp)
         assert slope == pytest.approx(40e6, rel=1e-9)
 
@@ -762,6 +827,7 @@ class TestGetStrategy:
 # 10. DDSRampStrategy tests
 # =====================================================================
 
+
 class TestDDSRampStrategy:
     """Verify ramp slope computation and S-curve generation."""
 
@@ -773,52 +839,122 @@ class TestDDSRampStrategy:
     def scurve_strategy(self) -> DDSRampStrategy:
         return DDSRampStrategy(config=RampConfig(use_scurve=True, scurve_segments=8))
 
-    def test_slope_for_timer_positive_ramp(self, strategy):
-        ramp = RFRamp(channel=0, core=0, f_start=60e6, f_end=80e6,
-                       amplitude_pct=4.0, duration_s=0.2)
-        slope = strategy._slope_for_timer(ramp, timer_s=0.2)
-        assert slope == pytest.approx(100e6, rel=1e-9)  # 20 MHz / 0.2s
+    def test_slope_for_duration_positive_ramp(self, strategy):
+        ramp = RFRamp(
+            channel=0,
+            core=0,
+            f_start=60e6,
+            f_end=80e6,
+            amplitude_pct=4.0,
+            duration_s=50e-6,
+        )
+        slope = strategy._slope_for_duration(ramp, duration_s=50e-6)
+        assert slope == pytest.approx(20e6 / 50e-6, rel=1e-9)
 
-    def test_slope_for_timer_negative_ramp(self, strategy):
-        ramp = RFRamp(channel=0, core=0, f_start=80e6, f_end=60e6,
-                       amplitude_pct=4.0, duration_s=0.2)
-        slope = strategy._slope_for_timer(ramp, timer_s=0.2)
-        assert slope == pytest.approx(-100e6, rel=1e-9)
+    def test_slope_for_duration_negative_ramp(self, strategy):
+        ramp = RFRamp(
+            channel=0,
+            core=0,
+            f_start=80e6,
+            f_end=60e6,
+            amplitude_pct=4.0,
+            duration_s=50e-6,
+        )
+        slope = strategy._slope_for_duration(ramp, duration_s=50e-6)
+        assert slope == pytest.approx(-20e6 / 50e-6, rel=1e-9)
 
-    def test_slope_for_timer_no_motion(self, strategy):
-        ramp = RFRamp(channel=0, core=0, f_start=70e6, f_end=70e6,
-                       amplitude_pct=4.0, duration_s=0.2)
-        slope = strategy._slope_for_timer(ramp, timer_s=0.2)
+    def test_slope_for_duration_no_motion(self, strategy):
+        ramp = RFRamp(
+            channel=0,
+            core=0,
+            f_start=70e6,
+            f_end=70e6,
+            amplitude_pct=4.0,
+            duration_s=50e-6,
+        )
+        slope = strategy._slope_for_duration(ramp, duration_s=50e-6)
         assert slope == 0.0
+
+    def test_slope_for_timer_alias(self, strategy):
+        """Back-compat alias must match ``_slope_for_duration``."""
+        ramp = RFRamp(
+            channel=0,
+            core=0,
+            f_start=60e6,
+            f_end=80e6,
+            amplitude_pct=4.0,
+            duration_s=0.2,
+        )
+        assert strategy._slope_for_timer(ramp, 0.2) == strategy._slope_for_duration(
+            ramp, 0.2
+        )
 
     def test_scurve_slopes_sum_to_delta_f(self, scurve_strategy):
         """Sum of S-curve segment slopes × segment_time ≈ delta_f."""
-        ramp = RFRamp(channel=0, core=0, f_start=60e6, f_end=80e6,
-                       amplitude_pct=4.0, duration_s=0.2)
-        slopes = scurve_strategy._compute_scurve_slopes(ramp, n_segments=8)
+        duration_s = 50e-6
+        ramp = RFRamp(
+            channel=0,
+            core=0,
+            f_start=60e6,
+            f_end=80e6,
+            amplitude_pct=4.0,
+            duration_s=duration_s,
+        )
+        slopes = scurve_strategy._compute_scurve_slopes(
+            ramp, n_segments=8, duration_s=duration_s
+        )
         assert len(slopes) == 8
 
-        # Each segment lasts duration / n_segments
-        dt = ramp.duration_s / 8
+        # Segment wall-clock must match the T used for slope math
+        dt = duration_s / 8
         total_delta = sum(s * dt for s in slopes)
-        # Should approximately equal delta_f = 20 MHz
+        assert total_delta == pytest.approx(20e6, rel=0.05)
+
+    def test_scurve_explicit_duration_overrides_ramp_field(self, scurve_strategy):
+        """Hardware T must come from the batch duration, not a stale field."""
+        ramp = RFRamp(
+            channel=0,
+            core=0,
+            f_start=60e6,
+            f_end=80e6,
+            amplitude_pct=4.0,
+            duration_s=0.2,
+        )  # stale / wrong
+        true_T = 50e-6
+        slopes = scurve_strategy._compute_scurve_slopes(
+            ramp, n_segments=8, duration_s=true_T
+        )
+        dt = true_T / 8
+        total_delta = sum(s * dt for s in slopes)
         assert total_delta == pytest.approx(20e6, rel=0.05)
 
     def test_scurve_slopes_symmetric(self, scurve_strategy):
         """S-curve slopes should be symmetric (acceleration == deceleration)."""
-        ramp = RFRamp(channel=0, core=0, f_start=60e6, f_end=80e6,
-                       amplitude_pct=4.0, duration_s=0.2)
+        ramp = RFRamp(
+            channel=0,
+            core=0,
+            f_start=60e6,
+            f_end=80e6,
+            amplitude_pct=4.0,
+            duration_s=0.2,
+        )
         slopes = scurve_strategy._compute_scurve_slopes(ramp, n_segments=16)
         # First half slopes should mirror second half (reversed)
         for i in range(8):
-            assert abs(slopes[i] - slopes[15 - i]) < 1e3, (
-                f"Asymmetry at segment {i}: {slopes[i]} vs {slopes[15 - i]}"
-            )
+            assert (
+                abs(slopes[i] - slopes[15 - i]) < 1e3
+            ), f"Asymmetry at segment {i}: {slopes[i]} vs {slopes[15 - i]}"
 
     def test_scurve_slopes_bell_shaped(self, scurve_strategy):
         """Peak slope should be in the middle segments (bell curve)."""
-        ramp = RFRamp(channel=0, core=0, f_start=60e6, f_end=80e6,
-                       amplitude_pct=4.0, duration_s=0.2)
+        ramp = RFRamp(
+            channel=0,
+            core=0,
+            f_start=60e6,
+            f_end=80e6,
+            amplitude_pct=4.0,
+            duration_s=0.2,
+        )
         slopes = scurve_strategy._compute_scurve_slopes(ramp, n_segments=16)
         # Middle slopes should be larger than edge slopes
         mid_slope = slopes[8]
@@ -826,8 +962,14 @@ class TestDDSRampStrategy:
         assert abs(mid_slope) > abs(edge_slope)
 
     def test_scurve_static_ramp_all_zero(self, scurve_strategy):
-        ramp = RFRamp(channel=0, core=0, f_start=70e6, f_end=70e6,
-                       amplitude_pct=4.0, duration_s=0.2)
+        ramp = RFRamp(
+            channel=0,
+            core=0,
+            f_start=70e6,
+            f_end=70e6,
+            amplitude_pct=4.0,
+            duration_s=0.2,
+        )
         slopes = scurve_strategy._compute_scurve_slopes(ramp, n_segments=8)
         assert all(s == 0.0 for s in slopes)
 
@@ -840,14 +982,28 @@ class TestDDSRampStrategy:
     def test_strategy_name(self, strategy):
         assert strategy.name == "ramp"
 
-    def test_trigger_timer_stored(self, strategy):
-        """_trigger_timer_s should be initialized with a default."""
-        assert strategy._trigger_timer_s > 0
+    def test_idle_timer_stored(self, strategy):
+        """Idle TIMER defaults until configure(); move pacing uses duration."""
+        assert strategy._idle_timer_s > 0
+
+    def test_compute_slope_matches_slope_for_duration(self, strategy):
+        ramp = RFRamp(
+            channel=0,
+            core=0,
+            f_start=60e6,
+            f_end=80e6,
+            amplitude_pct=4.0,
+            duration_s=50e-6,
+        )
+        assert strategy.compute_slope(ramp) == pytest.approx(
+            strategy._slope_for_duration(ramp, 50e-6)
+        )
 
 
 # =====================================================================
 # 11. DDSPatternStrategy tests
 # =====================================================================
+
 
 class TestDDSPatternStrategy:
     """Verify pattern strategy construction and configuration."""
@@ -884,48 +1040,37 @@ class TestDDSPatternStrategy:
 # 12. DDSCameraTriggeredStrategy tests
 # =====================================================================
 
+
 class TestDDSCameraTriggeredStrategy:
     """Verify camera trigger safety constraints and configuration."""
 
     def test_safe_trigger_level_accepted(self):
         """Trigger level < 2.0 V should be accepted."""
-        s = DDSCameraTriggeredStrategy(
-            config=CameraTriggerConfig(trigger_level_v=1.5)
-        )
+        s = DDSCameraTriggeredStrategy(config=CameraTriggerConfig(trigger_level_v=1.5))
         assert s.config.trigger_level_v == pytest.approx(1.5)
 
     def test_unsafe_trigger_level_at_limit_raises(self):
         """Trigger level == 2.0 V should raise."""
         with pytest.raises(ValueError, match="safety limit"):
-            DDSCameraTriggeredStrategy(
-                config=CameraTriggerConfig(trigger_level_v=2.0)
-            )
+            DDSCameraTriggeredStrategy(config=CameraTriggerConfig(trigger_level_v=2.0))
 
     def test_unsafe_trigger_level_above_limit_raises(self):
         """Trigger level > 2.0 V should raise."""
         with pytest.raises(ValueError, match="safety limit"):
-            DDSCameraTriggeredStrategy(
-                config=CameraTriggerConfig(trigger_level_v=3.0)
-            )
+            DDSCameraTriggeredStrategy(config=CameraTriggerConfig(trigger_level_v=3.0))
 
     def test_unsafe_trigger_level_much_above_raises(self):
         """Trigger level = 5.0 V should raise."""
         with pytest.raises(ValueError, match="safety limit"):
-            DDSCameraTriggeredStrategy(
-                config=CameraTriggerConfig(trigger_level_v=5.0)
-            )
+            DDSCameraTriggeredStrategy(config=CameraTriggerConfig(trigger_level_v=5.0))
 
     def test_minimum_trigger_level_accepted(self):
         """Very low trigger level should be accepted."""
-        s = DDSCameraTriggeredStrategy(
-            config=CameraTriggerConfig(trigger_level_v=0.1)
-        )
+        s = DDSCameraTriggeredStrategy(config=CameraTriggerConfig(trigger_level_v=0.1))
         assert s.config.trigger_level_v == pytest.approx(0.1)
 
     def test_strategy_name(self):
-        s = DDSCameraTriggeredStrategy(
-            config=CameraTriggerConfig(trigger_level_v=1.0)
-        )
+        s = DDSCameraTriggeredStrategy(config=CameraTriggerConfig(trigger_level_v=1.0))
         assert s.name == "camera_triggered"
 
     def test_config_defaults(self):
@@ -955,9 +1100,7 @@ class TestDDSCameraTriggeredStrategy:
         assert s.config.trigger_coupling == "AC"
 
     def test_shutdown_clears_trigger(self):
-        s = DDSCameraTriggeredStrategy(
-            config=CameraTriggerConfig(trigger_level_v=1.0)
-        )
+        s = DDSCameraTriggeredStrategy(config=CameraTriggerConfig(trigger_level_v=1.0))
         s._trigger = "dummy"
         s.shutdown(dds=None)
         assert s._trigger is None
@@ -968,8 +1111,109 @@ class TestDDSCameraTriggeredStrategy:
 
 
 # =====================================================================
-# 13. DDSStreamingStrategy tests
+# 13. Transport timing (AOD_speed authority)
 # =====================================================================
+
+
+class TestTransportTiming:
+    """Move pacing must follow travel_duration_s / AOD_speed (travel only)."""
+
+    def test_transport_duration_from_batch(self):
+        batch = AWGBatch(ramps=[], total_duration_s=50e-6)
+        assert transport_duration_s(batch) == pytest.approx(50e-6)
+
+    def test_transport_duration_holding_is_zero(self):
+        batch = AWGBatch(ramps=[], total_duration_s=0.0)
+        assert transport_duration_s(batch) == 0.0
+
+    def test_wait_transport_noops_when_already_waited(self):
+        # Should return immediately (no long sleep)
+        wait_transport(50e-6, already_waited_s=1.0)
+
+    def test_wait_transport_sleeps_remainder(self, monkeypatch):
+        slept = []
+
+        def fake_sleep(dt):
+            slept.append(dt)
+
+        monkeypatch.setattr("awg_controller.src.dds_strategies.time.sleep", fake_sleep)
+        wait_transport(100e-6, already_waited_s=40e-6)
+        assert len(slept) == 1
+        assert slept[0] == pytest.approx(60e-6)
+
+    def test_prefill_count_capped_for_tiny_idle_timer(self):
+        assert prefill_count_for_timer(1e-6) <= PREFILL_MAX_COUNT
+        assert prefill_count_for_timer(1e-6) >= 1
+
+    def test_prefill_count_matches_hardware_config(self):
+        from awg_controller.scripts.atommover_controller import HardwareConfig
+
+        hw = HardwareConfig(trigger_timer_s=0.2)
+        assert hw.prefill_count == prefill_count_for_timer(0.2)
+        assert hw.prefill_count == 50  # floor(10/0.2)
+
+    def test_converter_duration_tracks_aod_speed(self):
+        from atommovr.utils.timing import travel_duration_s
+
+        settings = AODSettings(
+            f_min_v=60e6,
+            f_max_v=100e6,
+            f_min_h=60e6,
+            f_max_h=100e6,
+            grid_rows=10,
+            grid_cols=10,
+        )
+        slow = RFConverter(settings, PhysicalParams(AOD_speed=0.1, spacing=5e-6))
+        fast = RFConverter(settings, PhysicalParams(AOD_speed=0.2, spacing=5e-6))
+        move = Move(0, 0, 1, 0)
+        d_slow = slow.convert_moves([move]).total_duration_s
+        d_fast = fast.convert_moves([move]).total_duration_s
+        assert d_slow == pytest.approx(2 * d_fast)
+        assert d_slow == pytest.approx(travel_duration_s([move], 5e-6, 0.1))
+
+    def test_batch_duration_is_travel_only(self):
+        """AWG batch duration equals shared travel_duration_s."""
+        from atommovr.utils.timing import travel_duration_s
+
+        settings = AODSettings(
+            f_min_v=60e6,
+            f_max_v=100e6,
+            f_min_h=60e6,
+            f_max_h=100e6,
+            grid_rows=10,
+            grid_cols=10,
+        )
+        converter = RFConverter(settings, PhysicalParams(AOD_speed=0.1, spacing=5e-6))
+        move = Move(0, 0, 1, 0)
+        batch = converter.convert_moves([move])
+        assert batch.total_duration_s == pytest.approx(
+            travel_duration_s([move], 5e-6, 0.1)
+        )
+
+    def test_ramp_slope_uses_batch_duration_not_idle_timer(self):
+        """Regression: slopes must use AOD_speed travel, not 0.2 s idle."""
+        strategy = DDSRampStrategy()
+        strategy._idle_timer_s = 0.2  # idle default must not affect slope
+        duration_s = 50e-6
+        ramp = RFRamp(
+            channel=0,
+            core=0,
+            f_start=60e6,
+            f_end=80e6,
+            amplitude_pct=4.0,
+            duration_s=duration_s,
+        )
+        slope = strategy._slope_for_duration(ramp, duration_s)
+        assert slope == pytest.approx(20e6 / duration_s)
+        # Idle timer would give a wildly different slope if misused
+        wrong = strategy._slope_for_duration(ramp, strategy._idle_timer_s)
+        assert abs(slope) > abs(wrong) * 1000
+
+
+# =====================================================================
+# 14. DDSStreamingStrategy tests
+# =====================================================================
+
 
 class TestDDSStreamingStrategy:
     """Verify the streaming strategy (baseline comparison)."""
@@ -997,8 +1241,9 @@ class TestDDSStreamingStrategy:
 
 
 # =====================================================================
-# 14. Strategy integration with controller (simulation mode)
+# 15. Strategy integration with controller (simulation mode)
 # =====================================================================
+
 
 class TestStrategyIntegration:
     """Test that strategies integrate with atommovrController."""
@@ -1020,13 +1265,10 @@ class TestStrategyIntegration:
             strategy = get_strategy(strategy_name)
 
         sw = SoftwareConfig(
-            grid_size=8,
-            target_size=4,
-            algorithm_name="PCFA",
+            physical_params=PhysicalParams(middle_size=[4, 3]),
+            algorithm_name="Hungarian",
             max_rounds=3,
-            aod_settings=_make_simple_settings(
-                grid_rows=8, grid_cols=5, target_rows=4, target_cols=4,
-            ),
+            aod_settings=_make_simple_settings(grid_rows=8, grid_cols=5),
         )
         hw = HardwareConfig()
         ctrl = atommovrController(sw, hw, strategy=strategy)
@@ -1065,9 +1307,8 @@ class TestStrategyIntegration:
         )
 
         sw = SoftwareConfig(
-            grid_size=6,
-            target_size=4,
-            algorithm_name="PCFA",
+            physical_params=PhysicalParams(middle_size=[3, 2]),
+            algorithm_name="Hungarian",
             aod_settings=_make_simple_settings(grid_rows=6, grid_cols=4),
         )
         hw = HardwareConfig()
@@ -1085,9 +1326,8 @@ class TestStrategyIntegration:
         )
 
         sw = SoftwareConfig(
-            grid_size=6,
-            target_size=4,
-            algorithm_name="PCFA",
+            physical_params=PhysicalParams(middle_size=[3, 2]),
+            algorithm_name="Hungarian",
             aod_settings=_make_simple_settings(grid_rows=6, grid_cols=4),
         )
         hw = HardwareConfig()

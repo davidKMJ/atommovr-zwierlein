@@ -8,7 +8,9 @@ This package isolates all AWG / DDS control logic from the `atommovr` simulation
 
 ```mermaid
 flowchart LR
+    Cam["Camera<br/>(real / offline)"] -->|occupancy| Ctrl["atommovrController"]
     Algo["Rearrangement<br/>Algorithm"] -->|Move list| RF["RFConverter<br/>(awg_control)"]
+    Ctrl --> Algo
     RF -->|AWGBatch| Strat["DDS Strategy<br/>(dds_strategies)"]
     Strat -->|spcm API| Card["AWG Card<br/>(hardware)"]
     Card -->|RF signal| AOD["AOD"]
@@ -21,18 +23,24 @@ awg_controller/
 ├── src/
 │   ├── __init__.py          # Re-exports public API
 │   ├── awg_control.py       # RFConverter, AODSettings, AWGBatch, hardware constants
-│   └── dds_strategies.py    # 4 DDS strategy classes + registry
+│   ├── dds_strategies.py    # 4 DDS strategy classes + registry
+│   ├── camera.py            # Camera ABC, RealArrayCamera, OfflineArrayCamera
+│   ├── offline_camera.py    # Compatibility shim → camera.py
+│   └── session_recorder.py  # Optional stage dumps / rounds.jsonl / GIFs
 ├── scripts/
-│   └── atommovr_controller.py   # Closed-loop feedback controller
+│   ├── atommover_controller.py  # Closed-loop feedback controller
+│   └── atommovr_controller.py   # Compatibility shim → atommover_controller
 ├── tests/
-│   ├── test_awg_control.py       # RFConverter unit tests
-│   └── test_controller_pipeline.py  # Full pipeline integration tests
+│   ├── test_awg_control.py
+│   ├── test_controller_pipeline.py
+│   ├── test_offline_and_calibration.py
+│   └── test_session_recorder.py
 ├── docs/
-│   ├── dds_strategy_ramp.md           # FPGA frequency ramp documentation
-│   ├── dds_strategy_pattern.md        # Pattern-based execution documentation
-│   └── dds_strategy_camera_triggered.md  # Camera-triggered documentation
-├── config/                   # Hardware configuration templates
-└── README.md                 # This file
+│   ├── dds_strategy_ramp.md
+│   ├── dds_strategy_pattern.md
+│   └── dds_strategy_camera_triggered.md
+├── config/
+└── README.md
 ```
 
 ## Hardware
@@ -58,14 +66,19 @@ awg_controller/
 
 ## DDS Strategies
 
-Four interchangeable strategies implement the `DDSStrategy` interface:
+Four interchangeable strategies implement the `DDSStrategy` interface.
 
-| Strategy | Trigger | Frequency transition | Key advantage |
-|---|---|---|---|
-| `streaming` | TIMER | Abrupt hop | Simple, battle-tested |
-| `ramp` | TIMER + FPGA slope | Smooth sweep | Best transport quality, S-curve support |
-| `pattern` | TIMER + CARD + `force()` | Abrupt hop | No FIFO underrun risk |
-| `camera_triggered` | TIMER + CARD + ext0 TTL | Abrupt hop | Zero software jitter, hardware-synced |
+**Timing**: AWG move pacing uses **travel** only —
+`atommovr.utils.timing.travel_duration_s` (Chebyshev × spacing / `AOD_speed`).
+`HardwareConfig.trigger_timer_s` / `--trg-timer` is the idle/holding TIMER.
+Camera TTL is independent of travel.
+
+| Strategy           | Trigger                  | Frequency transition | Key advantage                           |
+| ------------------ | ------------------------ | -------------------- | --------------------------------------- |
+| `streaming`        | TIMER                    | Abrupt hop           | Simple, battle-tested                   |
+| `ramp`             | TIMER + FPGA slope       | Smooth sweep         | Best transport quality, S-curve support |
+| `pattern`          | TIMER + CARD + `force()` | Abrupt hop           | No FIFO underrun risk                   |
+| `camera_triggered` | TIMER + CARD + ext0 TTL  | Abrupt hop           | Zero software jitter, hardware-synced   |
 
 Select a strategy by name or instance:
 
@@ -76,6 +89,17 @@ strategy = get_strategy("ramp", use_scurve=True, scurve_segments=16)
 ```
 
 Detailed documentation for each strategy is in `docs/`.
+
+## Camera and recording
+
+`Camera` (`src/camera.py`) is the shared imaging interface: acquire →
+`detect_occupancy` → `sync(array, recorder=…)`. Subclasses:
+
+- `OfflineArrayCamera` — synthetic fluorescence for closed-loop tests without hardware
+- `RealArrayCamera` — wraps a grabber callable for a physical camera
+
+`SessionRecorder` (`src/session_recorder.py`) is optional; pass it to the
+controller (`recorder=`) for per-stage dumps, `rounds.jsonl`, and GIFs.
 
 ## Usage
 
@@ -95,22 +119,30 @@ converter = RFConverter(settings, PhysicalParams())
 
 # Convert moves to RF commands
 batch = converter.convert_moves([Move(0, 0, 2, 1)])
-print(f"{len(batch.ramps)} ramps, {batch.total_duration_s*1e6:.1f} µs")
+print(f"{len(batch.ramps)} ramps, travel={batch.total_duration_s*1e6:.1f} µs")
 ```
 
 ### Full Controller (simulation mode)
 
 ```python
-from awg_controller.scripts.atommovr_controller import (
+from awg_controller.scripts.atommover_controller import (
     atommovrController, HardwareConfig, SoftwareConfig,
 )
+from atommovr.utils.core import PhysicalParams
 
-sw = SoftwareConfig(grid_size=10, target_size=6, algorithm_name="PCFA")
-hw = HardwareConfig(trigger_timer_s=0.2)
+sw = SoftwareConfig(
+    grid_size=10,
+    algorithm_name="PCFA",
+    physical_params=PhysicalParams(middle_size=[6, 6]),
+)
+hw = HardwareConfig(trigger_timer_s=0.2)  # idle / holding TIMER
 
 with atommovrController(sw, hw, strategy="ramp") as ctrl:
     success = ctrl.run()
 ```
+
+Defaults to an `OfflineArrayCamera` when no camera is passed. Attach a
+`SessionRecorder` via `recorder=` for stage dumps and `rounds.jsonl`.
 
 ### Full Controller (with hardware)
 
@@ -121,8 +153,9 @@ hw = HardwareConfig(
     trigger_timer_s=0.2,
 )
 sw = SoftwareConfig(
-    grid_size=10, target_size=6,
+    grid_size=10,
     algorithm_name="PCFA",
+    physical_params=PhysicalParams(middle_size=[6, 5]),
     aod_settings=AODSettings(
         f_min_v=60e6, f_max_v=100e6,
         f_min_h=60e6, f_max_h=100e6,
@@ -131,13 +164,13 @@ sw = SoftwareConfig(
 )
 
 with atommovrController(sw, hw, strategy="pattern") as ctrl:
-    success = ctrl.run(initial_image="fluorescence.png")
+    success = ctrl.run()
 ```
 
 ### CLI
 
 ```bash
-python awg_controller/scripts/atommovr_controller.py \
+python awg_controller/scripts/atommover_controller.py \
     --algorithm PCFA \
     --grid-rows 10 --grid-cols 5 \
     --target-rows 6 --target-cols 5 \

@@ -29,7 +29,7 @@ from atommovr.utils.imaging.extraction import (
     inverse_rotate_centroids,
 )
 from atommovr.utils.imaging.generation import generate_gaussian_image
-from atommovr.tests.test_imaging import (
+from atommovr.tests.imaging.test_imaging import (
     _angle_error_deg,
     _compute_assignment_metrics,
     _rotate_points_about_center,

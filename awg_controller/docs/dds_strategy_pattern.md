@@ -27,7 +27,8 @@ flowchart TD
 ```
 
 1. **Set `trg_src(TIMER)`**: Inter-step transitions are paced by the
-   timer (same as streaming).
+   travel window (`AWGBatch.total_duration_s`).
+   `HardwareConfig.trigger_timer_s` is idle / holding only.
 2. **Load initial frequencies** → `exec_at_trg()`.
 3. **Load final frequencies** → `exec_at_trg()`.
 4. **Switch to `trg_src(CARD)`** → `exec_at_trg()`. This creates a
@@ -70,11 +71,13 @@ strategy = DDSPatternStrategy(config=PatternConfig(
 ### Using with the Controller
 
 ```python
-from atommovr_controller import atommovrController, HardwareConfig, SoftwareConfig
+from awg_controller.scripts.atommover_controller import (
+    atommovrController, HardwareConfig, SoftwareConfig,
+)
 
 ctrl = atommovrController(
     sw_config=SoftwareConfig(...),
-    hw_config=HardwareConfig(trigger_timer_s=0.2),
+    hw_config=HardwareConfig(trigger_timer_s=0.2),  # idle / holding TIMER
     strategy="pattern",
 )
 ```

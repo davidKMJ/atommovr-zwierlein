@@ -40,12 +40,14 @@ sequenceDiagram
 3. **Trigger 3**: Set `frequency_slope(0)` to stop ramping, then set the
    exact final frequency to avoid accumulated rounding errors.
 
-The ramp duration equals one trigger-timer interval (`trigger_timer_s`).
+The ramp duration equals the batch travel window
+(`AWGBatch.total_duration_s` from `atommovr.utils.timing.travel_duration_s`).
+`HardwareConfig.trigger_timer_s` is the idle / holding TIMER only.
 
 ### Slope Computation
 
 ```
-slope = (f_end − f_start) / trigger_timer_s
+slope = (f_end − f_start) / total_duration_s
 ```
 
 For a static tone (no motion): `slope = 0`.
@@ -84,11 +86,13 @@ strategy = DDSRampStrategy(config=RampConfig(
 ### Using with the Controller
 
 ```python
-from atommovr_controller import atommovrController, HardwareConfig, SoftwareConfig
+from awg_controller.scripts.atommover_controller import (
+    atommovrController, HardwareConfig, SoftwareConfig,
+)
 
 ctrl = atommovrController(
     sw_config=SoftwareConfig(...),
-    hw_config=HardwareConfig(trigger_timer_s=0.1),  # Ramp duration!
+    hw_config=HardwareConfig(trigger_timer_s=0.1),  # idle / holding TIMER
     strategy="ramp",
 )
 ```

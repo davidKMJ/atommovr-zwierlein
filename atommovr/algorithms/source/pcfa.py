@@ -122,18 +122,13 @@ def _plan_row_compression(
     """
     compression_batches: List[List[Move]] = []
 
-    # Iterate over each row in the target vertical range
     for r in range(row_min, row_max):
-        # Get all atoms in the row
         atom_cols = sorted(np.where(state[r, :] == 1)[0])
 
         if not atom_cols:
             continue
 
-        # We want to compact all atoms to the left, starting at col_min.
-        # Mapping: atom_cols[i] -> col_min + i
-
-        # Check if already compacted
+        # Compact atoms left starting at col_min: atom_cols[i] -> col_min + i.
         is_compacted = True
         for i, src in enumerate(atom_cols):
             dst = col_min + i
@@ -147,32 +142,22 @@ def _plan_row_compression(
         row_moves: List[Move] = []
         for i, src in enumerate(atom_cols):
             dst = col_min + i
-
-            # Ensure we don't move off the grid
-            # if dst >= state.shape[1]:
-            # 	break
-
             if src == dst:
                 continue
-
             row_moves.append(Move(r, src, r, dst))
 
         if not row_moves:
             continue
 
-        # Sort moves to allow safe sequential execution if chunked.
-        # Left movers (src > dst): Sort by dst Ascending.
-        # Right movers (src < dst): Sort by dst Descending.
+        # Order moves so no atom crosses another mid-chunk: left movers
+        # (src > dst) ascending by dst, right movers (src < dst) descending.
         left_movers = [m for m in row_moves if m.from_col > m.to_col]
         right_movers = [m for m in row_moves if m.from_col < m.to_col]
 
         left_movers.sort(key=lambda m: m.to_col)
         right_movers.sort(key=lambda m: m.to_col, reverse=True)
 
-        # Combine: Left movers first, then Right movers.
         sorted_moves = left_movers + right_movers
-
-        # Chunk by DOP
         chunks = _chunk_batch(sorted_moves, dop)
         compression_batches.extend(chunks)
         _apply_batches_to_state(state, chunks)
