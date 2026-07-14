@@ -19,7 +19,6 @@ atommovr.egg-info
 figs/frames/
 figs/*.gif
 figs/*.png
-figs/
 
 # Notebook checkpoints
 .ipynb_checkpoints/
