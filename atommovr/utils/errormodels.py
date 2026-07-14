@@ -322,7 +322,11 @@ class YbRydbergAODErrorModel(ErrorModel):
                     weights = [1.0, 0.0, 0.0]
 
             fail_event = random.choices(
-                [FailureEvent.SUCCESS, FailureEvent.PICKUP_FAIL, FailureEvent.PUTDOWN_FAIL],
+                [
+                    FailureEvent.SUCCESS,
+                    FailureEvent.PICKUP_FAIL,
+                    FailureEvent.PUTDOWN_FAIL,
+                ],
                 weights=weights,
                 k=1,
             )[0]
