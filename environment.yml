@@ -3,11 +3,14 @@ channels:
   - defaults
   - conda-forge
 dependencies:
+  - python=3.13
   - numpy
+  - scipy
   - scikit-learn
   - xarray
   - ipykernel
   - matplotlib
+  - seaborn
   - setuptools # needed because lazy-build calls PPSU/setupc.py
   - pip
   - pip:

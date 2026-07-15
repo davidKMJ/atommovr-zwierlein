@@ -1,9 +1,9 @@
-##Algorithm for the Balance and Compact Algorithm
-import numpy as np
 import copy
+import numpy as np
 
-from atommovr.utils.Move import Move
-from atommovr.utils.move_utils import move_atoms
+##Algorithm for the Balance and Compact Algorithm
+from atommovr.utils.move_utils import Move, move_atoms
+
 from atommovr.algorithms.source.ejection import ejection
 from atommovr.algorithms.source.generalized_balance import (
     right_move,
@@ -113,10 +113,8 @@ def pre_balance(matrix, target_config, row_min, row_max, col_min, col_max, move_
     n_req_c = int(
         np.sum(target_config[row_min : row_max + 1, middle_col + 1 : col_max + 1])
     )
-    # print(f"n_req: {n_req}")
     N_S_i_m = int(np.sum(matrix[row_min : row_max + 1, col_min : middle_col + 1]))
     N_S_i_m_c = int(np.sum(matrix[row_min : row_max + 1, middle_col + 1 : col_max + 1]))
-    # print(f"Atoms:{N_S_i_m}")
 
     if N_S_i_m > n_req and N_S_i_m_c < n_req_c:
         # Shift excess 1s down from S[i:m+1] to S[m+1:j+1]
@@ -174,12 +172,10 @@ def balance_bc(
     n_req_c = int(
         np.sum(target_config[middle_row + 1 : row_max + 1, col_min : col_max + 1])
     )
-    # print(f"n_req: {n_req}")
 
     # Calculate the actual number of 1s in the submatrix S[i:m+1]
     N_S_i_m = int(np.sum(matrix[row_min : middle_row + 1, col_min : col_max + 1]))
     N_S_i_m_c = int(np.sum(matrix[middle_row + 1 : row_max + 1, col_min : col_max + 1]))
-    # print(f"Atoms:{N_S_i_m}")
 
     if N_S_i_m > n_req and N_S_i_m_c < n_req_c:
         # Shift excess 1s down from S[i:m+1] to S[m+1:j+1]
@@ -260,7 +256,6 @@ def down_move(
     brute_force_start = []
     brute_force_end = []
 
-    # while excess_atoms >  0:
     while row_max >= source_row >= row_min and excess_atoms > 0:
         moves_in_scan = []
 
@@ -274,7 +269,6 @@ def down_move(
                 move = Move(
                     source_row + normalize_row, col, source_row + normalize_row + 1, col
                 )
-                # print(f'{move.from_row}, {move.from_col} -> {move.to_row}, {move.to_col}')
                 moves_in_scan.append(move)
 
                 if balance_row_count == 1:
@@ -301,7 +295,6 @@ def down_move(
                         move = Move(
                             target_row + shift, col, target_row + shift + 1, col
                         )
-                        # print(f'{move.from_row}, {move.from_col} -> {move.to_row}, {move.to_col}')
                         moves_in_scan.append(move)
 
                 if len(moves_in_scan) > 0:
@@ -391,7 +384,6 @@ def up_move(
     brute_force_start = []
     brute_force_end = []
 
-    # while needed_atoms > 0:
     while row_max >= source_row >= row_min and needed_atoms > 0:
         moves_in_scan = []
         for col in range(col_min, col_max + 1):
@@ -404,7 +396,6 @@ def up_move(
                 move = Move(
                     source_row + normalize_row, col, source_row + normalize_row - 1, col
                 )
-                # print(f'{move.from_row}, {move.from_col} -> {move.to_row}, {move.to_col}')
                 moves_in_scan.append(move)
 
                 if balance_row_count == 1:
@@ -430,7 +421,6 @@ def up_move(
                         move = Move(
                             target_row - shift, col, target_row - shift - 1, col
                         )
-                        # print(f'{move.from_row}, {move.from_col} -> {move.to_row}, {move.to_col}')
                         moves_in_scan.append(move)
 
                 if len(moves_in_scan) > 0:

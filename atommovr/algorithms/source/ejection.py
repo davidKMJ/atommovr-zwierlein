@@ -9,8 +9,25 @@ from atommovr.utils.core import left_right_atom_in_row, top_bot_atom_in_col
 
 
 def ejection(
-    init_config: np.ndarray, target_config: np.ndarray, final_size=None
+    init_config: np.ndarray,
+    target_config: np.ndarray,
+    final_size=None,
+    method: str = "sublattice",
 ) -> tuple[list, np.ndarray]:
+    """
+    Eject atoms that are unwanted (present in ``init_config`` but absent from
+    ``target_config``) toward the nearest array edge, sweeping remaining atoms
+    into the vacated target sites along the way.
+
+    ``method`` currently only supports ``"sublattice"`` (divide unwanted atoms
+    into left/right/top/bottom sublattices and eject each toward its nearest
+    edge). It is accepted as a forward-compatible hook for future strategies.
+    """
+    if method != "sublattice":
+        raise NotImplementedError(
+            f"Ejection method '{method}' is not implemented; only 'sublattice' is currently supported."
+        )
+
     matrix = copy.deepcopy(init_config)
     move_list = []
 
@@ -288,7 +305,7 @@ def ver_ejection(
                                 ]
                             )
                         except ValueError:
-                            pass
+                            atom_to_move_row = None
                     else:
                         try:
                             atom_to_move_row = max(
@@ -299,7 +316,7 @@ def ver_ejection(
                                 ]
                             )
                         except ValueError:
-                            pass
+                            atom_to_move_row = None
                     target_replacement_dict[col] = atom_to_move_row
 
         cols_to_move = []
@@ -427,15 +444,11 @@ def generate_eject_coordinates(matrix, target_config):
         for y in range(len_y):
             if matrix[y][x] == 1 and target_config[y][x] == 0:
                 if x >= y and x < len_y - y:
-                    # left_eject.append((y, x))
                     top_eject.append((y, x))
                 elif x >= y and x >= len_y - y:
-                    # bot_eject.append((y, x))
                     right_eject.append((y, x))
                 elif x < y and x <= len_y - y:
-                    # top_eject.append((y, x))
                     left_eject.append((y, x))
                 elif x <= y and x >= len_y - y:
-                    # right_eject.append((y, x))
                     bot_eject.append((y, x))
     return left_eject, bot_eject, top_eject, right_eject

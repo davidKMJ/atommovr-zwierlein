@@ -1090,7 +1090,6 @@ class TestFIRST_ROUND_EDGES_FOR_BEST_SET:
         best_atom_set: np.ndarray = np.asarray([], dtype=np.intp)
 
         edges: set[tuple[int, int]] = bc_new.first_round_edges_for_best_set(
-            init_config,
             target_config,
             best_atom_set=best_atom_set,
         )
@@ -1102,7 +1101,6 @@ class TestFIRST_ROUND_EDGES_FOR_BEST_SET:
         best_atom_set: np.ndarray = np.asarray([1, 3, 5], dtype=np.intp)
 
         edges: set[tuple[int, int]] = bc_new.first_round_edges_for_best_set(
-            init_config,
             target_config,
             best_atom_set=best_atom_set,
         )
@@ -1114,7 +1112,6 @@ class TestFIRST_ROUND_EDGES_FOR_BEST_SET:
         best_atom_set: np.ndarray = np.asarray([0, 4], dtype=np.intp)
 
         edges: set[tuple[int, int]] = bc_new.first_round_edges_for_best_set(
-            init_config,
             target_config,
             best_atom_set=best_atom_set,
         )
@@ -1126,7 +1123,6 @@ class TestFIRST_ROUND_EDGES_FOR_BEST_SET:
         best_atom_set: np.ndarray = np.asarray([0, 5], dtype=np.intp)
 
         edges: set[tuple[int, int]] = bc_new.first_round_edges_for_best_set(
-            init_config,
             target_config,
             best_atom_set=best_atom_set,
         )
@@ -1145,7 +1141,6 @@ class TestFIRST_ROUND_EDGES_FOR_BEST_SET:
             target_config,
         )
         edges: set[tuple[int, int]] = bc_new.first_round_edges_for_best_set(
-            init_config,
             target_config,
             best_atom_set=best_atom_set,
         )
@@ -1172,7 +1167,6 @@ class TestFIRST_ROUND_EDGES_FOR_BEST_SET:
             target_config,
         )
         edges: set[tuple[int, int]] = bc_new.first_round_edges_for_best_set(
-            init_config,
             target_config,
             best_atom_set=best_atom_set,
         )
@@ -1199,7 +1193,6 @@ class TestFIRST_ROUND_EDGES_FOR_BEST_SET:
             target_config,
         )
         edges: set[tuple[int, int]] = bc_new.first_round_edges_for_best_set(
-            init_config,
             target_config,
             best_atom_set=best_atom_set,
         )
@@ -1222,7 +1215,6 @@ class TestFIRST_ROUND_EDGES_FOR_BEST_SET:
             target_config,
         )
         edges: set[tuple[int, int]] = bc_new.first_round_edges_for_best_set(
-            init_config,
             target_config,
             best_atom_set=best_atom_set,
         )
@@ -1242,7 +1234,6 @@ class TestFIRST_ROUND_EDGES_FOR_BEST_SET:
 
         with pytest.raises(ValueError, match="size must match"):
             bc_new.first_round_edges_for_best_set(
-                init_config,
                 target_config,
                 best_atom_set=bad_best_atom_set,
             )
@@ -1276,7 +1267,6 @@ class TestFIRST_ROUND_EDGES_FOR_BEST_SET:
                         target_config,
                     )
                     edges: set[tuple[int, int]] = bc_new.first_round_edges_for_best_set(
-                        init_config,
                         target_config,
                         best_atom_set=best_atom_set,
                     )
@@ -1291,7 +1281,6 @@ class TestFIRST_ROUND_EDGES_FOR_BEST_SET:
                     target_config,
                 )
                 edges = bc_new.first_round_edges_for_best_set(
-                    init_config,
                     target_config,
                     best_atom_set=best_atom_set,
                 )
@@ -1419,7 +1408,6 @@ class TestFIRST_ROUND_EDGES_FOR_BEST_SET_COMPATIBILITY:
                 target_config,
             )
             edges_new: set[tuple[int, int]] = bc_new.first_round_edges_for_best_set(
-                init_config,
                 target_config,
                 best_atom_set=best_atom_set,
             )

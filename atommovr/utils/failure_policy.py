@@ -2,7 +2,7 @@
 Failure event bitmask policy (ordering + suppression rules).
 
 This module defines:
-- `FailureEvent`: tracks the physical mechanisms by which a `Move` can fail (see atommover.utils.Move for info on this class).
+- `FailureEvent`: tracks the physical mechanisms by which a `Move` can fail (see atommovr.utils.Move for info on this class).
 - `FailureBit`: bit positions for recording multiple failure events per `Move`.
 - `FailureFlag`: tracks the simulation outcome of a move.
 - `FAILURE_EVENT_TO_FLAG`: dictionary mapping events to flags for use in simulation.
@@ -162,7 +162,7 @@ _DOMINANCE_RULES: tuple[tuple[FailureBit, tuple[FailureBit, ...]], ...] = (
     (FailureBit.NO_ATOM, ()),
     # COLLISION_INEVITABLE dominates everything except NO_ATOM
     (FailureBit.COLLISION_INEVITABLE, (FailureBit.NO_ATOM,)),
-    # COLLISION_AVOIDABLE dominates unless NO_ATOM / CROSSED_STATIC / PICKUP_FAIL also occurred
+    # COLLISION_AVOIDABLE dominates unless NO_ATOM / COLLISION_INEVITABLE / PICKUP_FAIL also occurred
     (
         FailureBit.COLLISION_AVOIDABLE,
         (FailureBit.NO_ATOM, FailureBit.COLLISION_INEVITABLE, FailureBit.PICKUP_FAIL),

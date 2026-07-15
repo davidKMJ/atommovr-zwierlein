@@ -1,7 +1,0 @@
-System Size,Success Rate (Naive),Success Rate Std (Naive),Success Rate (Inside Out),Success Rate Std (Inside Out)
-2,1,0,1,0
-4,0.999,0.0009995,1,0
-6,0.868,0.010704018,1,0
-8,0.613,0.015402305,1,0
-10,0.356,0.015141466,1,0
-12,0.18,0.012149074,1,0

@@ -102,11 +102,14 @@ class TestMove:
     @pytest.mark.parametrize(
         ["from_row", "from_col", "to_row", "to_col"], [[1, 0, 3, 1], [3, 2, 2, 0]]
     )
-    def test_move_raises_on_greater_than_one_displacement(
+    def test_move_allows_greater_than_one_displacement(
         self, from_row, from_col, to_row, to_col
     ):
-        with pytest.raises(ValueError):
-            _ = Move(from_row, from_col, to_row, to_col)
+        # Multi-site displacements are permitted so that algorithms such as
+        # PCFA and Tetris can emit logical (axis-aligned) transport moves.
+        move = Move(from_row, from_col, to_row, to_col)
+        assert move.dx == to_col - from_col
+        assert move.dy == to_row - from_row
 
 
 class TestMoveType:

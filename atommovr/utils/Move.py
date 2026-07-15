@@ -74,10 +74,6 @@ class Move:
 
         self.dx = to_col - from_col
         self.dy = to_row - from_row
-        if self.dx > 1 or self.dx < -1 or self.dy > 1 or self.dy < -1:
-            raise ValueError(
-                "An individual move cannot displace an atom by more than one array site in either direction."
-            )
 
         self.distance = self._get_distance()
         self.midx, self.midy = self._get_move_midpoint()
@@ -129,7 +125,8 @@ class Move:
         - SUCCESS -> SUCCESS
         - PICKUP_FAIL -> NO_PICKUP (atom stays at source)
         - NO_ATOM -> NO_ATOM (no atom to move)
-        - PUTDOWN_FAIL, CROSSED_STATIC, CROSSED_MOVING, ACCEL_FAIL, DECEL_FAIL, TRANSPORT_FAIL -> LOSS (atom is lost)
+        - PUTDOWN_FAIL, ACCEL_FAIL, DECEL_FAIL, TRANSPORT_FAIL, COLLISION_INEVITABLE,
+          COLLISION_AVOIDABLE -> LOSS (atom is lost)
         """
         if self.fail_event not in FAILURE_EVENT_TO_FLAG:
             raise ValueError(f"Invalid fail_event: {self.fail_event}")

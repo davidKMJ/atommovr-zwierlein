@@ -3,8 +3,8 @@ import copy
 import numpy as np
 from collections import deque
 
-from atommovr.utils.Move import Move
-from atommovr.utils.move_utils import move_atoms
+from atommovr.utils.move_utils import Move, move_atoms
+
 from atommovr.algorithms.source.ejection import ejection
 
 
@@ -106,12 +106,10 @@ def row_balance(
     n_req_c = int(
         np.sum(target_config[middle_row + 1 : row_max + 1, col_min : col_max + 1])
     )
-    # print(f"n_req: {n_req}")
 
     # Calculate the actual number of 1s in the submatrix S[i:m+1]
     N_S_i_m = int(np.sum(matrix[row_min : middle_row + 1, col_min : col_max + 1]))
     N_S_i_m_c = int(np.sum(matrix[middle_row + 1 : row_max + 1, col_min : col_max + 1]))
-    # print(f"Atoms:{N_S_i_m}")
 
     if N_S_i_m > n_req and N_S_i_m_c < n_req_c:
         # Shift excess 1s down from S[i:m+1] to S[m+1:j+1]
@@ -188,10 +186,8 @@ def col_balance(
     n_req_c = int(
         np.sum(target_config[row_min : row_max + 1, middle_col + 1 : col_max + 1])
     )
-    # print(f"n_req: {n_req}")
     N_S_i_m = int(np.sum(matrix[row_min : row_max + 1, col_min : middle_col + 1]))
     N_S_i_m_c = int(np.sum(matrix[row_min : row_max + 1, middle_col + 1 : col_max + 1]))
-    # print(f"Atoms:{N_S_i_m}")
 
     if N_S_i_m > n_req and N_S_i_m_c < n_req_c:
         # Shift excess 1s down from S[i:m+1] to S[m+1:j+1]
@@ -287,7 +283,6 @@ def down_move(
                 move = Move(
                     source_row + normalize_row, col, source_row + normalize_row + 1, col
                 )
-                # print(f'{move.from_row}, {move.from_col} -> {move.to_row}, {move.to_col}')
                 moves_in_scan.append(move)
 
                 if balance_row_count == 1:
@@ -314,7 +309,6 @@ def down_move(
                         move = Move(
                             target_row + shift, col, target_row + shift + 1, col
                         )
-                        # print(f'{move.from_row}, {move.from_col} -> {move.to_row}, {move.to_col}')
                         moves_in_scan.append(move)
 
                 if len(moves_in_scan) > 0:
@@ -422,7 +416,6 @@ def up_move(
                 move = Move(
                     source_row + normalize_row, col, source_row + normalize_row - 1, col
                 )
-                # print(f'{move.from_row}, {move.from_col} -> {move.to_row}, {move.to_col}')
                 moves_in_scan.append(move)
 
                 if balance_row_count == 1:
@@ -448,7 +441,6 @@ def up_move(
                         move = Move(
                             target_row - shift, col, target_row - shift - 1, col
                         )
-                        # print(f'{move.from_row}, {move.from_col} -> {move.to_row}, {move.to_col}')
                         moves_in_scan.append(move)
 
                 if len(moves_in_scan) > 0:
@@ -470,8 +462,6 @@ def up_move(
 
         # if source_row > row_max and needed_atoms > 0:
         ## Slide up move to achieve balance
-        # print(f"Up move, Lattice1:{row_min}, {middle_row}, {col_min}, {col_max}")
-        # print(f"Up move, Lattice2:{middle_row+1}, {row_max}, {col_min}, {col_max}")
     if needed_atoms > 0:
         # Find unbalance atoms
         for col_ind in range(col_min, col_max + 1):
@@ -574,6 +564,9 @@ def right_move(
         ):
             for shift in range(stuff, -1, -1):
                 moves_in_scan = []
+                # Ensure we don't access out-of-bounds columns
+                if target_col + shift + 1 >= len(matrix[0]):
+                    continue
                 for row in range(row_min, row_max + 1):
                     if (
                         matrix[row, target_col + shift] == 1
@@ -691,7 +684,6 @@ def left_move(
                 move = Move(
                     row, source_col + normalize_col, row, source_col + normalize_col - 1
                 )
-                # print(f'{move.from_row}, {move.from_col} -> {move.to_row}, {move.to_col}')
                 moves_in_scan.append(move)
 
                 # Decrement the number of excess atoms
@@ -720,7 +712,6 @@ def left_move(
                         move = Move(
                             row, target_col - shift, row, target_col - shift - 1
                         )
-                        # print(f'{move.from_row}, {move.from_col} -> {move.to_row}, {move.to_col}')
                         moves_in_scan.append(move)
 
                 if len(moves_in_scan) > 0:
@@ -742,8 +733,6 @@ def left_move(
         # if source_col > col_max and excess_atoms > 0:
         ## Slide up move to achieve balance
         # fig_atom_arrays(matrix)
-        # print(f"Left move, Lattice1:{row_min}, {row_max}, {col_min}, {middle_col}")
-        # print(f"Left move, Lattice2:{row_min}, {row_max}, {middle_col+1}, {col_max}")
 
     if excess_atoms > 0:
         # Find unbalance atoms

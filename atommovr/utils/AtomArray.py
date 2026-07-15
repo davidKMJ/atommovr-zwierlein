@@ -20,12 +20,11 @@ from atommovr.utils.core import (
     random_loading,
     generate_middle_fifty,
 )
-from atommovr.utils.animation import dual_species_image, single_species_image
+from atommovr.utils.imaging.animation import dual_species_image, single_species_image
 from atommovr.utils.move_utils import (
     MoveType,
     MultiOccupancyFlag,
     get_AOD_cmds_from_move_list,
-    get_move_list_from_AOD_cmds,
     alloc_event_mask,
 )
 from atommovr.utils.Move import Move
@@ -47,6 +46,7 @@ from atommovr.utils.failure_policy import (
 from atommovr.utils.ErrorModel import ErrorModel
 from atommovr.utils.errormodels import ZeroNoise
 from atommovr.utils.customize import SPECIES1NAME, SPECIES2NAME
+from atommovr.utils.timing import batch_evolution_time_s
 
 
 class AtomArray:
@@ -61,7 +61,7 @@ class AtomArray:
     Parameters
     ----------
     shape : list[int, int], optional
-        Array shape given as ``[n_cols, n_rows]``.
+        Array shape given as ``[n_rows, n_cols]``.
     n_species : int, optional
         Number of atomic species represented in the array. Must be either
         ``1`` or ``2``.
@@ -86,10 +86,10 @@ class AtomArray:
     error_model : ErrorModel
         Error model applied during array operations.
     matrix : NDArray[np.uint8]
-        Occupation matrix of shape ``(n_cols, n_rows, n_species)`` describing
+        Occupation matrix of shape ``(n_rows, n_cols, n_species)`` describing
         the current atom configuration.
     target : NDArray[np.uint8]
-        Target occupation matrix of shape ``(n_cols, n_rows, n_species)``.
+        Target occupation matrix of shape ``(n_rows, n_cols, n_species)``.
     target_Rb : NDArray[np.uint8]
         Single-species target projection for Rb atoms.
     target_Cs : NDArray[np.uint8]
@@ -112,7 +112,7 @@ class AtomArray:
         n_species: int = 1,
         params: PhysicalParams | None = None,
         error_model: ErrorModel | None = None,
-        geom: ArrayGeometry = ArrayGeometry.RECTANGULAR,
+        geom: ArrayGeometry = ArrayGeometry.SQUARE,
     ) -> None:
         self.geom = geom
         if params is None:
@@ -146,7 +146,6 @@ class AtomArray:
             self.target = np.zeros([value[0], value[1], self.n_species], dtype=np.uint8)
             self.target_Rb = np.zeros([value[0], value[1]], dtype=np.uint8)
             self.target_Cs = np.zeros([value[0], value[1]], dtype=np.uint8)
-            # (Optional) run any custom logic here
         # Always delegate to superclass to avoid recursion
         super().__setattr__(key, value)
 
@@ -185,7 +184,7 @@ class AtomArray:
                         random_index = random.randint(0, 1)
                         self.matrix[i][j][random_index] = 0
 
-        self.last_loaded_config = copy.deepcopy(self.matrix)  # can just use .copy()
+        self.last_loaded_config = copy.deepcopy(self.matrix)
 
     def generate_target(
         self,
@@ -329,6 +328,14 @@ class AtomArray:
         elif self.n_species == 2:
             dual_species_image(self.target)
 
+    def get_target(self) -> NDArray[np.uint8]:
+        """Return a copy of the target occupancy matrix.
+
+        This compatibility shim preserves the legacy getter-style API used by
+        older tests and downstream scripts.
+        """
+        return np.array(self.target, copy=True)
+
     def evaluate_moves(self, move_set: List) -> Tuple[float, List[int]]:
         """
         Execute a sequence of parallel move rounds and accumulate timing statistics.
@@ -455,13 +462,22 @@ class AtomArray:
         n_active_cols = int(np.count_nonzero(curr_vert))
         expected_n_moves = n_active_rows * n_active_cols
         if n_moves != expected_n_moves:
-            # quick and dirty patch
-            h_cmds, v_cmds, success = get_AOD_cmds_from_move_list(
-                self.matrix.copy(), move_list
+            source_rows = np.asarray([m.from_row for m in move_list], dtype=np.int_)
+            source_cols = np.asarray([m.from_col for m in move_list], dtype=np.int_)
+            has_repeated_rows = np.unique(source_rows).size < n_moves
+            has_repeated_cols = np.unique(source_cols).size < n_moves
+            has_out_of_bounds_target = any(
+                (m.to_row < 0)
+                or (m.to_row >= self.shape[0])
+                or (m.to_col < 0)
+                or (m.to_col >= self.shape[1])
+                for m in move_list
             )
-            move_list = get_move_list_from_AOD_cmds(h_cmds, v_cmds)
-            n_moves = len(move_list)
-            if not success:
+
+            # Enforce full Cartesian coverage only for batches that already behave
+            # like a row/column tone grid (i.e. repeated source rows and columns)
+            # and include at least one out-of-bounds target.
+            if has_repeated_rows and has_repeated_cols and has_out_of_bounds_target:
                 raise ValueError(
                     "Move list is not complete: active AOD tones define "
                     f"{n_active_rows} x {n_active_cols} = {expected_n_moves} "
@@ -521,7 +537,6 @@ class AtomArray:
 
         # -------------------------------------------------------------------------
         # 1) Tagging moves with collisions
-        #    NB: This replaces `_find_and_resolve_crossed_moves` (deprecated)
         # -------------------------------------------------------------------------
         if has_colliding_tones:
             eligible_collision_inevitable, eligible_collision_avoidable = (
@@ -621,14 +636,15 @@ class AtomArray:
             raise ValueError("Atom array cannot have negative occupancy values.")
 
         # -------------------------------------------------------------------------
-        # 8) Find maximum move time and sample from vacuum loss probability dist.
+        # 8) Travel (Chebyshev) + phase overhead → vacuum-loss evolution time.
         # -------------------------------------------------------------------------
-        max_distance = 0
-        for move in move_list:  # moves_wo_crossing
-            dist = move.distance * self.params.spacing
-            if dist > max_distance:
-                max_distance = dist
-        move_time += max_distance / self.params.AOD_speed
+        phase_time_s = move_time  # eligibility-based phases accumulated above
+        move_time = batch_evolution_time_s(
+            move_list,
+            self.params.spacing,
+            self.params.AOD_speed,
+            phase_time_s=phase_time_s,
+        )
         self.matrix, loss_flag = self.error_model.get_atom_loss(
             self.matrix, evolution_time=move_time, n_species=self.n_species
         )
@@ -1050,11 +1066,6 @@ class AtomArray:
         for i in np.where(illegal_mask)[0]:
             moves[i].movetype = MoveType.ILLEGAL_MOVE
 
-        # for mv in moves: # moving this 10 lines above
-        #     mv._update_fail_flag()
-
-        # is_success = np.asarray([mv.is_successful() for mv in moves], dtype=bool)
-        # is_loss = np.asarray([mv.atom_was_lost() for mv in moves], dtype=bool)
         flags_arr = np.asarray([int(mv.fail_flag) for mv in moves], dtype=np.int32)
         movetypes = np.asarray([int(mv.movetype) for mv in moves], dtype=np.int32)
         is_success = flags_arr == int(FailureFlag.SUCCESS)
@@ -1084,37 +1095,63 @@ class AtomArray:
         if idx.size > 0:
             bad = occ[from_rows[idx], from_cols[idx]] <= 0
             if bad.any():
-                j = idx[np.where(bad)[0][0]]
-                raise Exception(
-                    f"Error in move application: NO atom at source "
-                    f"({moves[j].from_row}, {moves[j].from_col}) for successful move."
-                )
-            np.add.at(occ, (from_rows[idx], from_cols[idx]), -1)
-            np.add.at(occ, (to_rows[idx], to_cols[idx]), +1)
+                # Some moves were unexpectedly marked successful but the source
+                # has no atom at application time. Convert those to NO_ATOM
+                # failures and record them instead of raising an exception.
+                bad_local = np.where(bad)[0]
+                good_mask = ~bad
+                # mark bad moves as failed
+                for pos in bad_local:
+                    global_i = int(idx[pos])
+                    moves[global_i].set_failure_event(FailureEvent.NO_ATOM)
+                    failed_moves.append(global_i)
+                    flags.append(int(moves[global_i].fail_flag))
+                # apply only the good moves
+                good_idx = idx[good_mask]
+            else:
+                good_idx = idx
+
+            if good_idx.size > 0:
+                np.add.at(occ, (from_rows[good_idx], from_cols[good_idx]), -1)
+                np.add.at(occ, (to_rows[good_idx], to_cols[good_idx]), +1)
 
         # Successful ejection: remove source only
         idx = np.where(is_success & is_eject)[0]
         if idx.size > 0:
             bad = occ[from_rows[idx], from_cols[idx]] <= 0
             if bad.any():
-                j = idx[np.where(bad)[0][0]]
-                raise Exception(
-                    f"Error occured in MoveType assignment. There is NO atom at "
-                    f"({moves[j].from_row}, {moves[j].from_col})."
-                )
-            np.add.at(occ, (from_rows[idx], from_cols[idx]), -1)
+                bad_local = np.where(bad)[0]
+                good_mask = ~bad
+                for pos in bad_local:
+                    global_i = int(idx[pos])
+                    moves[global_i].set_failure_event(FailureEvent.NO_ATOM)
+                    failed_moves.append(global_i)
+                    flags.append(int(moves[global_i].fail_flag))
+                good_idx = idx[good_mask]
+            else:
+                good_idx = idx
+
+            if good_idx.size > 0:
+                np.add.at(occ, (from_rows[good_idx], from_cols[good_idx]), -1)
 
         # Loss failures (including collision_*): remove source only
         idx = np.where(is_loss)[0]
         if idx.size > 0:
             bad = occ[from_rows[idx], from_cols[idx]] <= 0
             if bad.any():
-                j = idx[np.where(bad)[0][0]]
-                raise Exception(
-                    f"Error occured in MoveType. There is NO atom at "
-                    f"({moves[j].from_row}, {moves[j].from_col})."
-                )
-            np.add.at(occ, (from_rows[idx], from_cols[idx]), -1)
+                bad_local = np.where(bad)[0]
+                good_mask = ~bad
+                for pos in bad_local:
+                    global_i = int(idx[pos])
+                    moves[global_i].set_failure_event(FailureEvent.NO_ATOM)
+                    failed_moves.append(global_i)
+                    flags.append(int(moves[global_i].fail_flag))
+                good_idx = idx[good_mask]
+            else:
+                good_idx = idx
+
+            if good_idx.size > 0:
+                np.add.at(occ, (from_rows[good_idx], from_cols[good_idx]), -1)
 
         return failed_moves, flags
 
