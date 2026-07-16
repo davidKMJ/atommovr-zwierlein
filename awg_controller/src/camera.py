@@ -28,6 +28,7 @@ from atommovr.utils.imaging.extraction import (
 from atommovr.utils.imaging.generation import (
     compute_scaled_image_shape,
     generate_gaussian_image_from_binary_grid,
+    generate_gaussian_image_from_binary_grid_with_spacing,
 )
 
 if TYPE_CHECKING:
@@ -154,9 +155,15 @@ class RealArrayCamera(Camera):
 class GaussianCameraConfig:
     """Camera-like knobs for synthetic fluorescence images.
 
-    Pixel lattice spacing is controlled by ``image_shape`` and
-    ``min_spacing_px`` (via ``compute_scaled_image_shape``).  Physical
-    trap spacing (µm/m) lives on ``PhysicalParams`` and is independent.
+    By default, pixel lattice spacing is controlled by ``image_shape`` and
+    ``min_spacing_px`` (via ``compute_scaled_image_shape``). Set
+    ``spacing_x`` (and optionally ``spacing_y``, which defaults to
+    ``spacing_x``) to instead pin the lattice pitch directly in pixels,
+    independent of ``image_shape`` — see
+    ``generate_gaussian_image_from_binary_grid_with_spacing``. Either way,
+    ``image_shape`` is the sensor frame the lattice gets centered onto, and
+    may be considerably larger than the atom-bearing region. Physical trap
+    spacing (µm/m) lives on ``PhysicalParams`` and is independent of both.
     """
 
     image_shape: Tuple[int, int] = (624, 816)
@@ -165,12 +172,16 @@ class GaussianCameraConfig:
     background: float = 10.0
     noise_level: float = 0.02
     min_spacing_px: float = 24.0
+    spacing_x: Optional[float] = None
+    spacing_y: Optional[float] = None
     angle: float = 0.0
     dtype: np.dtype = field(default_factory=lambda: np.dtype(np.uint8))
     stripe_intensity: float = 0.001
 
     def resolve_shape(self, grid_shape: Tuple[int, int]) -> Tuple[int, int]:
-        """Return image shape large enough for ``grid_shape`` at ``min_spacing_px``."""
+        """Return image shape large enough for ``grid_shape`` at ``min_spacing_px``.
+
+        Only used on the legacy (``spacing_x is None``) path."""
         n = max(int(grid_shape[0]), int(grid_shape[1]))
         return compute_scaled_image_shape(
             self.image_shape, n, min_spacing_px=self.min_spacing_px
@@ -182,24 +193,38 @@ class GaussianCameraConfig:
         if binary.ndim != 2:
             raise ValueError(f"occupancy must be 2-D; got shape {binary.shape}")
 
-        shape = self.resolve_shape(binary.shape)
-        img = generate_gaussian_image_from_binary_grid(
-            binary,
-            sigma=self.sigma_px,
-            brightness_factor=float(self.peak_counts),
-            image_shape=shape,
-            noise_level=self.noise_level,
-            stripe_intensity=self.stripe_intensity,
-            angle=self.angle,
-        )
-        img = np.asarray(img, dtype=float)
-        h, w = shape
-        out = np.full(shape, float(self.background), dtype=float)
-        hh, ww = img.shape[:2]
-        y0 = max(0, (hh - h) // 2)
-        x0 = max(0, (ww - w) // 2)
-        crop = img[y0 : y0 + h, x0 : x0 + w]
-        out[: crop.shape[0], : crop.shape[1]] = crop + float(self.background)
+        if self.spacing_x is not None:
+            img = generate_gaussian_image_from_binary_grid_with_spacing(
+                binary,
+                spacing_x=self.spacing_x,
+                spacing_y=self.spacing_y,
+                sigma=self.sigma_px,
+                brightness_factor=float(self.peak_counts),
+                image_shape=self.image_shape,
+                noise_level=self.noise_level,
+                stripe_intensity=self.stripe_intensity,
+                angle=self.angle,
+            )
+            out = np.asarray(img, dtype=float) + float(self.background)
+        else:
+            shape = self.resolve_shape(binary.shape)
+            img = generate_gaussian_image_from_binary_grid(
+                binary,
+                sigma=self.sigma_px,
+                brightness_factor=float(self.peak_counts),
+                image_shape=shape,
+                noise_level=self.noise_level,
+                stripe_intensity=self.stripe_intensity,
+                angle=self.angle,
+            )
+            img = np.asarray(img, dtype=float)
+            h, w = shape
+            out = np.full(shape, float(self.background), dtype=float)
+            hh, ww = img.shape[:2]
+            y0 = max(0, (hh - h) // 2)
+            x0 = max(0, (ww - w) // 2)
+            crop = img[y0 : y0 + h, x0 : x0 + w]
+            out[: crop.shape[0], : crop.shape[1]] = crop + float(self.background)
 
         info = np.iinfo(self.dtype) if np.issubdtype(self.dtype, np.integer) else None
         if info is not None:
@@ -218,6 +243,11 @@ class OfflineArrayCamera(Camera):
     truth. ``sync()`` also writes a fresh (detected) reading back into
     ``array``, so offline mode exercises the same imaging pipeline a real
     camera would.
+
+    Defaults to ``GaussianCameraConfig()``; pass e.g.
+    ``image_generator=GaussianCameraConfig(spacing_x=..., spacing_y=...)``
+    to pin the lattice's pixel spacing directly instead of deriving it from
+    ``image_shape``/``min_spacing_px``.
     """
 
     def __init__(

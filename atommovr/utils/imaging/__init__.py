@@ -21,6 +21,12 @@ from atommovr.utils.imaging.generation import (
     gaussian_2d,
     generate_gaussian_image,
     generate_gaussian_image_from_binary_grid,
+    compute_spacing_image_shape,
+    render_gaussian_spots,
+    pad_image_to_shape,
+    add_sensor_noise,
+    generate_gaussian_image_with_padding,
+    generate_gaussian_image_from_binary_grid_with_spacing,
 )
 
 from atommovr.utils.imaging.geometry import rotate_points_ccw, rotate_points_cw
@@ -46,6 +52,12 @@ __all__ = [
     "gaussian_2d",
     "generate_gaussian_image",
     "generate_gaussian_image_from_binary_grid",
+    "compute_spacing_image_shape",
+    "render_gaussian_spots",
+    "pad_image_to_shape",
+    "add_sensor_noise",
+    "generate_gaussian_image_with_padding",
+    "generate_gaussian_image_from_binary_grid_with_spacing",
     "rotate_points_ccw",
     "rotate_points_cw",
     # extraction classes
