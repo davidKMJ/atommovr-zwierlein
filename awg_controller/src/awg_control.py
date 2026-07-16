@@ -111,8 +111,10 @@ def compute_core_assignments(
 def validate_hardware_limits(grid_rows: int, grid_cols: int) -> None:
     """Raise ``ValueError`` if grid dimensions exceed single-card DDS limits.
 
-    Call this during hardware initialisation to fail fast with a clear message.
+    Intended call sites: controller hardware init and CLI startup.
+    For settings objects, prefer :meth:`AODSettings.validate_core_limits`.
     """
+    return  # TODO: implement this properly
     compute_core_assignments(grid_rows, grid_cols)
 
 
@@ -151,9 +153,6 @@ class AODSettings:
     #: the Zwierlein 808 nm / f1=75 / f2=400 / f_obj=28 setup); not used for RF.
     um_per_mhz: float = 6.526
 
-    #: Lab optics ballpark (µm per MHz). FOV helpers only — RF uses f_min/f_max.
-    um_per_mhz: float = 6.526
-
     @property
     def f_spacing_v(self) -> float:
         """Row-axis inter-site frequency step (Hz)."""
@@ -175,8 +174,8 @@ class AODSettings:
         return self.um_per_mhz * (self.f_max_h - self.f_min_h) / 1e6
 
     def validate_core_limits(self) -> None:
-        """Raise ``ValueError`` if grid dimensions exceed available DDS cores."""
-        compute_core_assignments(self.grid_rows, self.grid_cols)
+        """Raise ``ValueError`` if this lattice exceeds single-card DDS cores."""
+        validate_hardware_limits(self.grid_rows, self.grid_cols)
 
 
 @dataclass

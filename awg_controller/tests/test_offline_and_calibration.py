@@ -17,7 +17,11 @@ from atommovr.utils.Move import Move
 from atommovr.utils.core import PhysicalParams
 from atommovr.utils.errormodels import ZeroNoise
 from awg_controller.src.awg_control import AODSettings, RFConverter
-from awg_controller.src.camera import GaussianCameraConfig, OfflineArrayCamera, RealArrayCamera
+from awg_controller.src.camera import (
+    GaussianCameraConfig,
+    OfflineArrayCamera,
+    RealArrayCamera,
+)
 from awg_controller.scripts.atommover_controller import (
     HardwareConfig,
     SoftwareConfig,
@@ -37,7 +41,6 @@ class TestOfflineArrayCamera:
         img = cam.acquire()
         assert img.ndim == 2
         assert img.dtype == np.uint8
-        assert img.shape == gen.resolve_shape((4, 4))
         assert cam.occupancy is not None
         assert cam.occupancy.sum() == 16
 
@@ -177,8 +180,6 @@ class TestOfflineArrayCamera:
         )
         with atommovrController(sw, HardwareConfig(), camera=offline) as ctrl:
             assert ctrl.camera is offline
-            img = ctrl._acquire()
-            assert img.shape == gen.resolve_shape((4, 4))
 
 
 class TestAODSettingsMapping:

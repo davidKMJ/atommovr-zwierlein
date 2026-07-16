@@ -29,6 +29,7 @@ data/
 
 # Session recorder dumps (camera stages + round JSONL)
 runs/
+*.log
 
 # .so files
 PPSU2023/libmatching_for_PPSU.so

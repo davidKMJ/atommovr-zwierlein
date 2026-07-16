@@ -624,6 +624,8 @@ def main() -> None:
     )
     args = p.parse_args()
 
+    validate_hardware_limits(args.grid_rows, args.grid_cols)
+
     hw = HardwareConfig(
         card_paths=args.card,
         trigger_timer_s=args.trg_timer,
