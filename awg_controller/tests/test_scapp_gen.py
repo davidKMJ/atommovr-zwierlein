@@ -1,5 +1,5 @@
 """
-Tests for the SCAPP GPU-generation backend (``awg_controller.src.scapp_gen``).
+Tests for the SCAPP GPU-generation backend (``awg_controller.src.scapp``).
 
 Pure phase/amplitude math is exercised with plain numpy (no cupy/hardware
 required); ``ScappFeeder``'s schedule-transition logic is exercised via a
@@ -25,7 +25,7 @@ if _REPO_ROOT not in sys.path:
 _SCRIPTS_DIR = os.path.join(os.path.dirname(__file__), "..", "scripts")
 
 from awg_controller.src.awg_control import AODSettings, AWGBatch, RFRamp
-from awg_controller.src.scapp_gen import (
+from awg_controller.src.scapp import (
     TWO_PI,
     ScappFeeder,
     ScappFeederConfig,
@@ -284,7 +284,7 @@ class TestScappFeederConfig:
 
 class TestScappFeederSimulationGuard:
     def test_module_imports_without_hardware_or_gpu(self):
-        import awg_controller.src.scapp_gen as sg
+        import awg_controller.src.scapp as sg
 
         assert sg.ToneSegment is not None
         assert sg.ScappFeeder is not None

@@ -12,9 +12,10 @@ dependencies = [
   "matplotlib",
   "setuptools",
   "imageio==2.36.1",
+  "pillow==11.1.0",
   "opencv-python-headless",
   "seaborn",
-  "scikit-learn"
+  "scikit-learn",
 ]
 
 [project.optional-dependencies]
@@ -25,6 +26,12 @@ dev = [
   "pytest",
   "pytest-cov",
   "ipykernel",
+]
+# Optional AWG / Spectrum Instrumentation stack. Simulation mode works without these.
+# CUDA/SCAPP extras stay in requirements-cuda.txt (Linux + NVIDIA only).
+hardware = [
+  "spcm",
+  "psutil",
 ]
 
 # =========================

@@ -2,17 +2,16 @@
 
 ## Overview
 
-The **camera-triggered strategy** combines the pattern-based approach
-(spcm example 15) with external hardware triggering (spcm example 09)
-to create a **fully hardware-synchronised** feedback loop. The camera's
-frame-ready TTL pulse directly starts the next rearrangement pattern —
-no software in the critical timing path.
+The **camera-triggered strategy** combines the pattern approach
+(spcm example 15) with external hardware triggering (spcm example 09).
+A camera frame-ready TTL on the card's `ext0` input starts each
+rearrangement pattern instead of `trigger.force()`.
 
 **Based on**: spcm DDS examples 09 (external trigger) + 15 (patterns).
 
 ## How It Works
 
-### Hardware-Synchronised Feedback Loop
+### Hardware-synced start
 
 ```mermaid
 flowchart LR
@@ -20,6 +19,10 @@ flowchart LR
     AWG -->|RF output| AOD["AOD"]
     AOD -->|atom positions| Camera
 ```
+
+Pattern **start** is driven by the TTL edge. Completion is still
+detected in software via `queue_cmd_count()` polling, then any remaining
+travel window is slept.
 
 ### Pattern Execution Sequence
 
@@ -34,11 +37,10 @@ flowchart TD
     C --> D["Poll queue_cmd_count() until 0"]
 ```
 
-The key difference from `DDSPatternStrategy`: instead of
-`trigger.force()` (software), the card waits for a **hardware TTL edge**
-on the `ext0` input. This eliminates all software timing jitter from
-the camera → transport path. Move pacing still uses the batch travel
-window; `trigger_timer_s` is idle / holding only.
+The difference from `DDSPatternStrategy`: instead of `trigger.force()`,
+the card waits for a hardware TTL edge on `ext0`. Move pacing still uses
+the batch travel window; `trigger_timer_s` is idle / holding only. The
+camera frame period is independent of `AOD_speed`.
 
 ### External Trigger Configuration
 
@@ -51,36 +53,26 @@ trigger.ext0_coupling(spcm.COUPLING_DC)        # DC coupling
 trigger.ext0_termination(spcm.SPCM_50OHM_ACTIVE)  # 50 Ω termination
 ```
 
-## ⚠️ DANGER: Voltage Safety
+## Safety limits
 
-### 🔴 CRITICAL: Trigger Level MUST Be Below 2.0 V
+Two separate limits apply:
 
-> **`trigger_level_v` is hard-limited to < 2.0 V in the constructor.**
->
-> Setting `trigger_level_v >= 2.0` will raise a `ValueError` immediately.
-> This is a safety interlock — **it cannot be bypassed**.
->
-> **Exceeding 2.0 V on the trigger input or output amplifier will
-> permanently damage the AOD driver.**
+| Setting | What it controls | Limit |
+|---------|------------------|-------|
+| `CameraTriggerConfig.trigger_level_v` | TTL detection threshold on ext0 | Must be `< 2.0` V (constructor raises `ValueError`) |
+| `HardwareConfig.max_amplitude_v` | RF output amplitude to the AOD amp | Keep `< 2.0` V (default 1.6 V) |
 
 ```python
-# ✅ SAFE — will work
+# Accepted
 strategy = DDSCameraTriggeredStrategy(
     config=CameraTriggerConfig(trigger_level_v=1.5)
 )
 
-# ❌ UNSAFE — raises ValueError immediately
+# Rejected — raises ValueError
 strategy = DDSCameraTriggeredStrategy(
-    config=CameraTriggerConfig(trigger_level_v=2.0)  # REJECTED!
+    config=CameraTriggerConfig(trigger_level_v=2.0)
 )
 ```
-
-### Output Amplitude Limit
-
-> **`HardwareConfig.max_amplitude_v` MUST be below 2.0 V.**
->
-> The default is 1.6 V. **NEVER increase this without verifying
-> amplifier output on an oscilloscope first.**
 
 ## Configuration
 
@@ -95,12 +87,12 @@ strategy = DDSCameraTriggeredStrategy()
 
 # Custom configuration
 strategy = DDSCameraTriggeredStrategy(config=CameraTriggerConfig(
-    trigger_level_v=1.0,              # TTL threshold (MUST be < 2.0 V)
+    trigger_level_v=1.0,              # TTL threshold (must be < 2.0 V)
     trigger_edge="rising",            # "rising" or "falling"
     trigger_coupling="DC",            # "DC" or "AC"
     trigger_termination_ohms=50.0,    # Input termination
     poll_interval_s=0.001,            # 1 ms poll interval
-    poll_timeout_s=30.0,              # 30 s timeout (camera may be slow)
+    poll_timeout_s=30.0,              # timeout while waiting for camera
 ))
 ```
 
@@ -120,7 +112,7 @@ ctrl = atommovrController(
 )
 ```
 
-Or via name (uses default 1.5 V trigger level):
+Or via name (default 1.5 V trigger level):
 
 ```python
 ctrl = atommovrController(
@@ -130,82 +122,66 @@ ctrl = atommovrController(
 )
 ```
 
-## ⚠️ Safety Instructions for Experimental Testing
+## Experimental checklist
 
-### Pre-Flight Checklist
-
-- [ ] `trigger_level_v` < 2.0 V in the configuration
+- [ ] `trigger_level_v` < 2.0 V
 - [ ] `max_amplitude_v` < 2.0 V in `HardwareConfig`
-- [ ] Amplifier output **disconnected** from AOD
-- [ ] Oscilloscope connected to amplifier output
-- [ ] Camera TTL output verified with oscilloscope
-- [ ] TTL cable connected: camera → AWG card ext0
+- [ ] Amplifier output disconnected from AOD
+- [ ] Oscilloscope on amplifier output
+- [ ] Camera TTL verified on oscilloscope
+- [ ] TTL cable: camera → AWG card ext0
 
-### Step-by-Step Testing Procedure
+### Phase 1: Verify Camera TTL
 
-#### Phase 1: Verify Camera TTL Signal
+1. Connect camera TTL output to an oscilloscope.
+2. Trigger the camera and note amplitude, edge timing, and pulse width.
+3. Set `trigger_level_v` to roughly half the TTL amplitude
+   (e.g. 1.5 V for 3.3 V TTL), staying below 2.0 V.
 
-1. Connect camera TTL output to oscilloscope.
-2. Trigger the camera and verify:
-   - TTL amplitude (should be 3.3 V or 5 V standard TTL).
-   - Edge timing relative to frame exposure.
-   - Pulse width and repetition rate.
-3. **Record the TTL amplitude** — you need this to set `trigger_level_v`.
-4. Set `trigger_level_v` to approximately **half** the TTL amplitude
-   (e.g., 1.5 V for 3.3 V TTL), but **NEVER above 2.0 V**.
+### Phase 2: Verify AWG Output (No AOD)
 
-#### Phase 2: Verify AWG Output (No AOD)
+1. Connect camera TTL to AWG ext0.
+2. Connect AWG output to an oscilloscope (not the AOD).
+3. Run with `max_amplitude_v = 1.0`.
+4. Confirm the pattern starts on TTL, frequencies look right, and the
+   card pauses between patterns.
+5. Disconnect the TTL once to confirm a `poll_timeout_s` error is logged.
 
-1. Connect camera TTL to AWG card ext0 input.
-2. Connect AWG output to oscilloscope (**NOT to the AOD**).
-3. Run the controller with `max_amplitude_v = 1.0` (conservative).
-4. Verify:
-   - Pattern executes when camera TTL fires.
-   - Frequency transitions occur at expected times.
-   - Output amplitude stays within safe limits.
-   - Card properly pauses between patterns waiting for next TTL.
-5. Test `poll_timeout_s` by disconnecting the camera TTL.
-   The strategy should log a timeout error after `poll_timeout_s`.
+### Phase 3: Connect to AOD
 
-#### Phase 3: Connect to AOD
-
-1. Set `max_amplitude_v` to production value (≤ 1.6 V).
-2. Re-verify on oscilloscope.
-3. **Only then** connect amplifier output to AOD.
-4. Monitor AOD response during first rearrangement cycles.
+1. Set `max_amplitude_v` to the production value (≤ 1.6 V).
+2. Re-check on the oscilloscope.
+3. Then connect the amplifier to the AOD.
 
 ### Troubleshooting
 
 | Symptom | Likely Cause | Fix |
 |---------|-------------|-----|
-| Pattern never executes | No TTL signal on ext0 | Check cable, camera trigger settings |
-| Timeout errors | TTL level below threshold | Lower `trigger_level_v` |
-| Double-triggers | Noisy TTL signal | Use DC coupling, add 50 Ω termination |
-| Pattern executes but wrong timing | Edge polarity mismatch | Switch `trigger_edge` |
+| Pattern never executes | No TTL on ext0 | Check cable / camera trigger settings |
+| Timeout errors | TTL below threshold | Lower `trigger_level_v` |
+| Double-triggers | Noisy TTL | DC coupling + 50 Ω termination |
+| Wrong edge timing | Edge polarity mismatch | Switch `trigger_edge` |
 | `ValueError` on construction | `trigger_level_v >= 2.0` | Reduce to < 2.0 V |
 
-### Holding Configuration Note
+### Holding configuration
 
-The `send_holding()` method uses `trigger.force()` (software trigger)
-instead of waiting for a camera TTL. This is intentional — when sending
-a holding configuration between rounds, the camera may not be imaging,
-so no TTL pulse is expected.
+`send_holding()` still uses `trigger.force()` rather than waiting for a
+camera TTL. Holding often runs when the camera is not imaging, so no
+TTL is expected.
 
 ## Comparison with Other Strategies
 
 | Property | Streaming | Ramp | Pattern | **Camera-Triggered** |
 |---|---|---|---|---|
 | Trigger source | Timer | Timer | force() | **ext0 TTL** |
-| Software jitter | Timer-paced | FPGA-driven | Polled | **Zero** |
-| Camera sync | Manual sleep | Manual sleep | Software | **Hardware** |
-| FIFO underrun risk | Yes | Yes | No | **No** |
+| Start sync | Software/timer | FPGA ramp | Software force | **Hardware TTL** |
+| Completion | Sleep | Sleep | Poll | **Poll** |
+| Camera sync | Manual sleep | Manual sleep | Software | **Hardware start** |
+| FIFO underrun risk | Yes | Prefill / streaming queue | No | **No** |
 | Wiring required | None | None | None | **Camera → ext0** |
 | Setup complexity | Low | Medium | Medium | **High** |
-| Experimental value | Baseline | Transport quality | Reliability | **Timing precision** |
 
 ## spcm API Reference
-
-spcm calls used by this strategy:
 
 ```python
 # DDS setup (same as pattern strategy)
@@ -233,5 +209,5 @@ flowchart TD
     CAM["Camera Frame-Ready<br/>TTL Output"] -->|BNC / SMA cable| EXT0["AWG Card ext0<br/>Trigger Input<br/>(50 Ω terminated, DC coupled)"]
 ```
 
-Ensure the cable is properly shielded to prevent noise-induced
-false triggers. Use a short cable (< 1 m) for best signal integrity.
+Use a short, shielded cable when practical to reduce noise-induced
+false triggers.

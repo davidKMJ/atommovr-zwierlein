@@ -67,8 +67,6 @@ except Exception:
     SpcmException = Exception  # type: ignore[assignment,misc]
     _HW_AVAILABLE = False
 
-# Optional GPU driver. cupy is genuinely absent (no macOS wheel) rather than
-# present-but-broken, so a plain ImportError guard is correct here.
 try:
     import cupy as cp
 

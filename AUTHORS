@@ -30,7 +30,7 @@ David Minjae Ko
 Massachusetts Institute of Technology, Zwierlein group
 2026
 Camera interfaces (Camera, RealArrayCamera, OfflineArrayCamera), SessionRecorder,
-shared travel timing (atommovr.utils.timing), closed-loop controller refinements,
+shared travel timing (atommovr.utils.timing), closed-loop controller refinements, SCAPP support, 
 code merging and cleanup
 
 ## Third-party code and attributions

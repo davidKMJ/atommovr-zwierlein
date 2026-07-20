@@ -40,7 +40,7 @@ from awg_controller.src.dds_strategies import (
     wait_transport,
     prefill_count_for_timer,
 )
-from awg_controller.src.scapp_gen import (
+from awg_controller.src.scapp import (
     ScappFeeder,
     ScappFeederConfig,
     ToneSegment,
@@ -78,7 +78,7 @@ __all__ = [
     "transport_duration_s",
     "wait_transport",
     "prefill_count_for_timer",
-    # scapp_gen
+    # scapp
     "ScappFeeder",
     "ScappFeederConfig",
     "ToneSegment",

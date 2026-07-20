@@ -14,7 +14,7 @@ Orchestrates the complete atom-rearrangement feedback loop:
 
 Two interchangeable hardware backends (``backend=`` on ``atommovrController``):
   - ``"scapp"`` (default) — GPU-direct RDMA generation
-    (``awg_controller.src.scapp_gen.ScappFeeder``). No fixed tone-count
+    (``awg_controller.src.scapp.ScappFeeder``). No fixed tone-count
     ceiling; ``strategy=`` is not applicable.
   - ``"legacy_dds"`` — the original DDS core-register approach
     (``awg_controller.src.dds_strategies``), selectable via ``strategy=``.
@@ -81,7 +81,7 @@ from awg_controller.src.dds_strategies import (
     STRATEGY_REGISTRY,
     get_strategy,
 )
-from awg_controller.src.scapp_gen import (
+from awg_controller.src.scapp import (
     ScappFeeder,
     ScappFeederConfig,
     _GPU_AVAILABLE as _SCAPP_GPU_AVAILABLE,
@@ -98,10 +98,6 @@ logging.basicConfig(
     ],
 )
 log = logging.getLogger(__name__)
-
-if not _HW_AVAILABLE:
-    log.warning("spcm not found - running in SIMULATION mode (no hardware I/O).")
-
 
 @dataclass
 class HardwareConfig:

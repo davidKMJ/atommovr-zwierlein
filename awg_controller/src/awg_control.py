@@ -3,7 +3,7 @@ AWG (Arbitrary Waveform Generator) control utilities for the atommovr pipeline.
 
 Converts logical atom ``Move`` objects into RF ramp commands (``AWGBatch``)
 that are executed by Spectrum Instrumentation cards, either via the SCAPP
-GPU-generation backend (default, ``awg_controller.src.scapp_gen``) or the
+GPU-generation backend (default, ``awg_controller.src.scapp``) or the
 legacy DDS backend (``awg_controller.src.dds_strategies``).
 
 Amplitude unit : percent of full-scale  (sum ≤ 40 % per channel, per manufacturer)
