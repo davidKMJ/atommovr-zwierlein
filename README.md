@@ -11,20 +11,14 @@ by [Nikhil Kiran Harle\*](https://github.com/khnikhil/khnikhil), [Bo-Yu Chen\*](
 ![overview](/figs/fig1.svg)
 
 :books: Open-source library of rearrangement algorithms: `atommovr.algorithms/`
-:books: Open-source library of rearrangement algorithms: `atommovr.algorithms/`
 
-:movie_camera: Visualization of rearrangement process: `atommovr.utils.animation.py`
 :movie_camera: Visualization of rearrangement process: `atommovr.utils.animation.py`
 
 :computer: Experimentally-relevant error modeling: `atommovr.utils.ErrorModel.py`
-:computer: Experimentally-relevant error modeling: `atommovr.utils.ErrorModel.py`
 
-:chart_with_upwards_trend: Flexible benchmarking suite for running experiments: `atommovr.utils.benchmarking.py`
 :chart_with_upwards_trend: Flexible benchmarking suite for running experiments: `atommovr.utils.benchmarking.py`
 
 :toolbox: Core utils for moving atoms and simulating stochastic loading: `atommovr.utils.core.py` and `atommovr.utils.move_utils.py`
-
-:camera: Realistic imaging pipeline: `atommovr.utils.imaging/` - Generate camera-like images from atom grids, extract centroids with blob detection, estimate grid angles, and fit detected atoms back to grids.
 
 # Use
 
@@ -35,33 +29,8 @@ Want to learn how to use this code? Curious about what it means to be an atom mo
 Want to reproduce the figures from our paper? Check out [`paper_figures.ipynb`](paper_figures.ipynb).
 
 Want to add an algorithm to the library, or make your own? Check out our template in [`atommovr.algorithms.Algorithm.py`](/atommovr/algorithms/Algorithm.py).
-Want to add an algorithm to the library, or make your own? Check out our template in [`atommovr.algorithms.Algorithm.py`](/atommovr/algorithms/Algorithm.py).
 
 Want to add some features and/or make this code nicer? Check out [`CONTRIBUTING.md`](CONTRIBUTING.md).
-
-## Imaging Pipeline Quick Start
-
-The new `atommovr.utils.imaging` subpackage provides realistic image synthesis and extraction:
-
-```python
-from atommovr.utils.AtomArray import AtomArray
-from atommovr.utils.imaging import extract_estimate_rotate_and_assign
-
-# Generate realistic camera image from atom array
-arr = AtomArray(shape=[6, 8], n_species=1)
-arr.load_tweezers()
-img = arr.render_realistic_image(sigma=1.5, image_shape=(128, 128))
-
-# Extract grid from image with angle correction
-binary_grid, angle_deg, n_centroids = extract_estimate_rotate_and_assign(
-    img, grid_shape=(6, 8),
-    method='blob',      # OpenCVs BlobDetection
-    angle_method='pca'  # multiple angle estimation options
-)
-print(f"Detected {binary_grid.sum()} atoms at {angle_deg:.1f}° rotation")
-```
-
-See [`imaging_demo.py`](imaging_demo.py) for complete examples.
 
 ## Installation
 

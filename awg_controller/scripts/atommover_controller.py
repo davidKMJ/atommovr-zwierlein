@@ -8,16 +8,19 @@ Orchestrates the complete atom-rearrangement feedback loop:
   2. Check whether target is already filled  →  done
   3. Compute rearrangement moves (configurable algorithm)
   4. Convert moves to RF ramps  (RFConverter / AWGBatch)
-  5. Write ramps to Spectrum Instrumentation DDS card  (spcm)
+  5. Write ramps to the Spectrum Instrumentation AWG card
   6. Offline: advance physics on the controller ``AtomArray``
   7. Repeat from step 1
 
-Hardware integration is copied verbatim from cli.py (source of truth):
-  - DDSCommandQueue for all core updates
-  - dds[core].freq() / .phase() / .amp()  in spcm units
-  - exec_at_trg() + write_to_card() per trigger event
-  - spcm.SPCM_DDS_TRG_SRC_TIMER trigger mode
-  - 40 % total amplitude budget per channel
+Two interchangeable hardware backends (``backend=`` on ``atommovrController``):
+  - ``"scapp"`` (default) — GPU-direct RDMA generation
+    (``awg_controller.src.scapp.ScappFeeder``). No fixed tone-count
+    ceiling; ``strategy=`` is not applicable.
+  - ``"legacy_dds"`` — the original DDS core-register approach
+    (``awg_controller.src.dds_strategies``), selectable via ``strategy=``.
+
+Both backends open a single card (multi-card support has been removed) and
+share the same 40 % total-amplitude-per-channel safety budget.
 """
 
 from __future__ import annotations
@@ -37,13 +40,16 @@ _REPO_ROOT = str(Path(__file__).resolve().parents[2])
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-#  optional hardware driver
+#  optional hardware driver.
+#  Broadened beyond ImportError: an installed-but-driverless `spcm` package
+#  raises a bare Exception from spcm_core/pyspcm.py when the vendor driver
+#  .so isn't found, not ImportError.
 try:
     import spcm
     from spcm import SpcmException
 
     _HW_AVAILABLE = True
-except ImportError:
+except Exception:
     spcm = None  # type: ignore[assignment]
     SpcmException = Exception  # type: ignore[assignment,misc]
     _HW_AVAILABLE = False
@@ -75,42 +81,73 @@ from awg_controller.src.dds_strategies import (
     STRATEGY_REGISTRY,
     get_strategy,
 )
+from awg_controller.src.scapp import (
+    ScappFeeder,
+    ScappFeederConfig,
+    _GPU_AVAILABLE as _SCAPP_GPU_AVAILABLE,
+)
 from awg_controller.src.session_recorder import SessionRecorder, moves_to_records
 
 #  logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(levelname)-8s  %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler("atommovr_controller.log"),
-    ],
-)
+#  Handler setup only happens when this file is run as the entry point (see
+#  `if __name__ == "__main__":` below) — importing this module as a library
+#  (tests, notebooks, other scripts) must not have the side effect of
+#  configuring the root logger or creating a log file.
 log = logging.getLogger(__name__)
 
-if not _HW_AVAILABLE:
-    log.warning("spcm not found - running in SIMULATION mode (no hardware I/O).")
+
+def _configure_logging() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s  %(levelname)-8s  %(message)s",
+        handlers=[
+            logging.StreamHandler(sys.stdout),
+            logging.FileHandler("atommovr_controller.log"),
+        ],
+    )
 
 
 @dataclass
 class HardwareConfig:
-    """Spectrum Instrumentation card configuration (mirrors cli.py defaults)."""
+    """Spectrum Instrumentation card configuration (mirrors cli.py defaults).
 
-    #: Device paths, e.g. ["/dev/spcm0"]  or  ["/dev/spcm0", "/dev/spcm1"]
-    card_paths: List[str] = field(default_factory=lambda: ["/dev/spcm0"])
+    A single card is opened regardless of backend — multi-card support has
+    been removed (it only ever broadcast identical commands to every card,
+    with no real per-card partitioning).
+    """
 
-    #: Output amplitude - manufacturer maximum is 1.6 V into 50 Ω
+    #: Device path, e.g. "/dev/spcm0"
+    card_path: str = "/dev/spcm0"
+
+    #: Output amplitude - manufacturer maximum is 1.6 V into 50 Ω. Hard
+    #: safety ceiling (both backends): must never exceed 2.0 V.
     max_amplitude_v: float = 1.6
 
     #: Output impedance
     output_load_ohms: float = 50.0
 
-    #: Timer-trigger interval (s).  Set to the expected move duration so the
-    #: card fires once per rearrangement batch.  cli.py default was 0.2 s.
+    #: legacy_dds only: idle/holding TIMER interval (s). Set to the expected
+    #: move duration so the card fires once per rearrangement batch. cli.py
+    #: default was 0.2 s. Unused by the scapp backend (continuous streaming
+    #: has no discrete TIMER trigger concept).
     trigger_timer_s: float = 0.2
 
-    #: Number of pre-fill writes during initialisation (prevents underruns).
-    #: cli.py uses  floor(10 / trg_timer); we keep that formula.
+    #: scapp only: GPU buffer fill block size (samples). See
+    #: ``ScappFeederConfig.notify_samples``.
+    notify_samples: int = 512 * 1024
+
+    #: scapp only: total RDMA-pinned DMA buffer size (samples). See
+    #: ``ScappFeederConfig.dma_buffer_samples``.
+    dma_buffer_samples: int = 32 * 1024 * 1024
+
+    #: scapp only: card.start() fires once the on-board buffer fill level
+    #: crosses this (per-mille). See
+    #: ``ScappFeederConfig.fill_start_threshold_promille``.
+    fill_start_threshold_promille: int = 800
+
+    #: legacy_dds only: number of pre-fill writes during initialisation
+    #: (prevents underruns). cli.py uses floor(10 / trg_timer); we keep
+    #: that formula.
     @property
     def prefill_count(self) -> int:
         return max(1, math.floor(10.0 / self.trigger_timer_s))
@@ -173,9 +210,16 @@ class atommovrController:
     recorder : SessionRecorder, optional
         Stage dumps + round JSONL logger. Owned by the controller and passed
         into ``Camera.sync`` / ``log_round`` each loop.
+    backend : str, optional
+        AWG generation backend: ``"scapp"`` (default, GPU-direct RDMA) or
+        ``"legacy_dds"`` (DDS core registers).
     strategy : DDSStrategy or str, optional
         DDS execution strategy (``"streaming"``, ``"ramp"``, ``"pattern"``,
-        ``"camera_triggered"``). Defaults to ``DDSStreamingStrategy``.
+        ``"camera_triggered"``). Only valid when ``backend="legacy_dds"``;
+        defaults to ``DDSStreamingStrategy`` in that case.
+    scapp_config : ScappFeederConfig, optional
+        Tuning knobs for the SCAPP feeder. Only used when
+        ``backend="scapp"``.
     """
 
     def __init__(
@@ -185,11 +229,20 @@ class atommovrController:
         camera: Optional[Camera] = None,
         camera_fn: Optional[Callable[[], np.ndarray]] = None,
         recorder: Optional[SessionRecorder] = None,
+        backend: str = "scapp",
         strategy: Optional[Union[DDSStrategy, str]] = None,
+        scapp_config: Optional[ScappFeederConfig] = None,
     ) -> None:
         if camera is not None and camera_fn is not None:
             raise ValueError("Pass camera= or camera_fn=, not both.")
+        if backend not in ("scapp", "legacy_dds"):
+            raise ValueError(
+                f"Unknown backend {backend!r}; expected 'scapp' or 'legacy_dds'."
+            )
+        if backend == "scapp" and strategy is not None:
+            raise ValueError("strategy= is only valid when backend='legacy_dds'.")
 
+        self.backend = backend
         self.sw = sw_config
         self.hw = hw_config
         self.recorder = recorder
@@ -218,15 +271,27 @@ class atommovrController:
                 blob_params=sw_config.blob_params,
             )
 
-        if strategy is None:
-            self.strategy: DDSStrategy = DDSStreamingStrategy()
-        elif isinstance(strategy, str):
-            self.strategy = get_strategy(strategy)
+        if self.backend == "legacy_dds":
+            if strategy is None:
+                self.strategy: Optional[DDSStrategy] = DDSStreamingStrategy()
+            elif isinstance(strategy, str):
+                self.strategy = get_strategy(strategy)
+            else:
+                self.strategy = strategy
+            self._scapp_config: Optional[ScappFeederConfig] = None
         else:
-            self.strategy = strategy
+            self.strategy = None
+            self._scapp_config = scapp_config or ScappFeederConfig(
+                ramp_shape=aod.ramp_shape,
+                notify_samples=hw_config.notify_samples,
+                dma_buffer_samples=hw_config.dma_buffer_samples,
+                fill_start_threshold_promille=hw_config.fill_start_threshold_promille,
+            )
 
         self.algorithm = _ALGORITHM_REGISTRY[sw_config.algorithm_name]()
-        self.rf_converter = RFConverter(aod, sw_config.physical_params)
+        self.rf_converter = RFConverter(
+            aod, sw_config.physical_params, backend=self.backend
+        )
 
         err = (
             sw_config.error_model if sw_config.error_model is not None else ZeroNoise()
@@ -238,8 +303,9 @@ class atommovrController:
             error_model=err,
         )
 
+        self._card: Any = None
         self._dds: Dict[int, Any] = {}
-        self._stack: Any = None
+        self._feeder: Optional[ScappFeeder] = None
         self._grid_rotation: float = 0.0
         self._target_mask: Optional[np.ndarray] = None
         self._apply_target()
@@ -251,11 +317,19 @@ class atommovrController:
     # ------------------------------------------------------------------
 
     def _initialize_hardware(self) -> None:
-        """Open cards, configure DDS, pre-fill buffer, enable trigger."""
+        """Open the card and start the active backend (SCAPP feeder or
+        legacy DDS strategy)."""
+        if self.backend == "legacy_dds":
+            self._initialize_legacy_dds()
+        else:
+            self._initialize_scapp()
+
+    def _initialize_legacy_dds(self) -> None:
+        """Open the card, configure DDS, pre-fill buffer, enable trigger."""
         if not _HW_AVAILABLE:
             log.info(
                 f"Simulation mode: hardware init skipped "
-                f"(strategy={self.strategy.name})."
+                f"(backend=legacy_dds, strategy={self.strategy.name})."
             )
             return
 
@@ -265,69 +339,105 @@ class atommovrController:
         )
 
         try:
-            self._stack = spcm.CardStack(self.hw.card_paths)
+            self._card = spcm.Card(self.hw.card_path)
             holding = self.rf_converter.holding_config()
             core_map = self.rf_converter.core_map
 
-            for card in self._stack.cards:
-                sn = card.sn()
-                card.card_mode(spcm.SPC_REP_STD_DDS)
-                channels = spcm.Channels(
-                    card=card,
-                    card_enable=spcm.CHANNEL0 | spcm.CHANNEL1,
-                )
-                channels.enable(True)
-                channels.amp(self.hw.max_amplitude_v * spcm.units.V)
-                channels.output_load(self.hw.output_load_ohms * spcm.units.ohm)
-                card.write_setup()
+            sn = self._card.sn()
+            self._card.card_mode(spcm.SPC_REP_STD_DDS)
+            channels = spcm.Channels(
+                card=self._card,
+                card_enable=spcm.CHANNEL0 | spcm.CHANNEL1,
+            )
+            channels.enable(True)
+            channels.amp(self.hw.max_amplitude_v * spcm.units.V)
+            channels.output_load(self.hw.output_load_ohms * spcm.units.ohm)
+            self._card.write_setup()
 
-                dds = self.strategy.create_dds(card, channels)
-                self.strategy.configure(dds, card, self.hw, core_map)
-                self.strategy.prefill(dds, holding, self.hw)
-                self._dds[sn] = dds
+            dds = self.strategy.create_dds(self._card, channels)
+            self.strategy.configure(dds, self._card, self.hw, core_map)
+            self.strategy.prefill(dds, holding, self.hw)
+            self._dds[sn] = dds
 
-            self.strategy.start(self._stack)
-            log.info(f"Hardware initialised (strategy={self.strategy.name}).")
+            self.strategy.start(self._card)
+            log.info(
+                f"Hardware initialised (backend=legacy_dds, strategy={self.strategy.name})."
+            )
 
         except SpcmException as exc:
             log.error(f"spcm error during init: {exc}")
-            self._close_stack()
+            self._close_hardware()
             raise
         except Exception as exc:
             log.error(f"Unexpected error during init: {exc}")
-            self._close_stack()
+            self._close_hardware()
+            raise
+
+    def _initialize_scapp(self) -> None:
+        """Open the card and start the SCAPP GPU feeder thread."""
+        if not _HW_AVAILABLE or not _SCAPP_GPU_AVAILABLE:
+            log.info(
+                f"Simulation mode: hardware init skipped (backend=scapp, "
+                f"hw_available={_HW_AVAILABLE}, gpu_available={_SCAPP_GPU_AVAILABLE})."
+            )
+            return
+
+        assert (
+            self.hw.max_amplitude_v <= 2.0
+        ), f"max_amplitude_v={self.hw.max_amplitude_v} exceeds 2.0 V hard safety ceiling"
+
+        try:
+            self._card = spcm.Card(self.hw.card_path)
+            self._feeder = ScappFeeder(
+                self._card, self.hw, self.sw.aod_settings, self._scapp_config
+            )
+            self._feeder.start(self.rf_converter.holding_config())
+            log.info(
+                f"Hardware initialised (backend=scapp, "
+                f"sample_rate={self._feeder.sample_rate_hz / 1e6:.1f} MHz)."
+            )
+
+        except SpcmException as exc:
+            log.error(f"spcm error during init: {exc}")
+            self._close_hardware()
+            raise
+        except Exception as exc:
+            log.error(f"Unexpected error during init: {exc}")
+            self._close_hardware()
             raise
 
     def _output_batch(self, batch: AWGBatch) -> None:
-        """Send one ``AWGBatch`` to all open cards via the active strategy."""
-        if not _HW_AVAILABLE or self._stack is None:
+        """Send one ``AWGBatch`` to the card via the active backend."""
+        if not _HW_AVAILABLE or self._card is None:
+            label = self.strategy.name if self.backend == "legacy_dds" else "scapp"
             log.info(
-                f"[SIM:{self.strategy.name}] batch: {len(batch.ramps)} ramps, "
+                f"[SIM:{label}] batch: {len(batch.ramps)} ramps, "
                 f"duration={batch.total_duration_s*1e6:.1f} µs"
             )
             if batch.total_duration_s > 0:
                 time.sleep(batch.total_duration_s)
             return
 
-        for card in self._stack.cards:
-            sn = card.sn()
-            dds = self._dds[sn]
+        if self.backend == "legacy_dds":
+            dds = self._dds[self._card.sn()]
             self.strategy.execute_batch(dds, batch)
+        else:
+            self._feeder.submit_batch(batch)
 
     def _send_holding(self) -> None:
         """Restore static holding configuration (atoms held in place)."""
         holding = self.rf_converter.holding_config()
 
-        if not _HW_AVAILABLE or self._stack is None:
-            log.info(
-                f"[SIM:{self.strategy.name}] holding: " f"{len(holding.ramps)} ramps"
-            )
+        if not _HW_AVAILABLE or self._card is None:
+            label = self.strategy.name if self.backend == "legacy_dds" else "scapp"
+            log.info(f"[SIM:{label}] holding: " f"{len(holding.ramps)} ramps")
             return
 
-        for card in self._stack.cards:
-            sn = card.sn()
-            dds = self._dds[sn]
+        if self.backend == "legacy_dds":
+            dds = self._dds[self._card.sn()]
             self.strategy.send_holding(dds, holding)
+        else:
+            self._feeder.submit_holding(holding)
 
     # ------------------------------------------------------------------
     # Imaging / targets
@@ -509,6 +619,16 @@ class atommovrController:
                     f"Round {r}: {n_moves} moves → {len(rf_batches)} hardware batches."
                 )
 
+                if recorder is not None:
+                    recorder.save_spectrogram(
+                        rf_batches,
+                        sample_rate_hz=recorder.spectrogram.sample_rate_hz
+                        or 4.0
+                        * max(
+                            self.sw.aod_settings.f_max_v, self.sw.aod_settings.f_max_h
+                        ),
+                    )
+
                 for batch in rf_batches:
                     self._output_batch(batch)
                 self._send_holding()
@@ -548,24 +668,37 @@ class atommovrController:
     # Shutdown
     # ------------------------------------------------------------------
 
-    def _close_stack(self) -> None:
-        if self._stack is not None:
-            for card in self._stack.cards:
-                sn = card.sn()
-                dds = self._dds.get(sn)
+    def _close_hardware(self) -> None:
+        if self.backend == "legacy_dds":
+            if self._card is not None:
+                dds = self._dds.get(self._card.sn())
                 if dds is not None:
-                    self.strategy.shutdown(dds, card)
-            try:
-                self._stack.close()
-            except Exception:
-                pass
-            self._stack = None
-            self._dds.clear()
+                    self.strategy.shutdown(dds, self._card)
+                try:
+                    self._card.stop(spcm.M2CMD_CARD_STOP)
+                except Exception:
+                    pass
+                try:
+                    self._card.close()
+                except Exception:
+                    pass
+                self._card = None
+                self._dds.clear()
+        else:
+            if self._feeder is not None:
+                self._feeder.stop()
+                self._feeder = None
+            if self._card is not None:
+                try:
+                    self._card.close()
+                except Exception:
+                    pass
+                self._card = None
 
     def shutdown(self) -> None:
         """Gracefully stop the card and release all resources."""
-        self._close_stack()
-        log.info(f"Controller shut down (strategy={self.strategy.name}).")
+        self._close_hardware()
+        log.info(f"Controller shut down (backend={self.backend}).")
 
     def __enter__(self):
         return self
@@ -602,15 +735,21 @@ def main() -> None:
     )
     p.add_argument(
         "--card",
-        action="append",
-        default=["/dev/spcm0"],
-        help="Card device path (repeat for multiple cards)",
+        type=str,
+        default="/dev/spcm0",
+        help="Card device path (single card; multi-card support removed)",
+    )
+    p.add_argument(
+        "--backend",
+        default="scapp",
+        choices=["scapp", "legacy_dds"],
+        help="AWG generation backend",
     )
     p.add_argument(
         "--trg-timer",
         type=float,
         default=0.2,
-        help="Trigger timer interval (s), sets move window",
+        help="Idle/holding TIMER interval (s), legacy_dds backend only",
     )
     p.add_argument("--f-min-v", type=float, default=60e6, help="V-AOD f_min (Hz)")
     p.add_argument("--f-max-v", type=float, default=100e6, help="V-AOD f_max (Hz)")
@@ -620,15 +759,29 @@ def main() -> None:
         "--strategy",
         default="streaming",
         choices=list(STRATEGY_REGISTRY),
-        help="DDS execution strategy",
+        help="DDS execution strategy, legacy_dds backend only",
+    )
+    p.add_argument(
+        "--ramp-shape",
+        default="linear",
+        choices=["linear", "scurve"],
+        help="SCAPP frequency-ramp shape, scapp backend only",
+    )
+    p.add_argument(
+        "--notify-samples",
+        type=int,
+        default=512 * 1024,
+        help="SCAPP GPU buffer notify block size (samples), scapp backend only",
     )
     args = p.parse_args()
 
-    validate_hardware_limits(args.grid_rows, args.grid_cols)
+    if args.backend == "legacy_dds":
+        validate_hardware_limits(args.grid_rows, args.grid_cols)
 
     hw = HardwareConfig(
-        card_paths=args.card,
+        card_path=args.card,
         trigger_timer_s=args.trg_timer,
+        notify_samples=args.notify_samples,
     )
     sw = SoftwareConfig(
         grid_size=max(args.grid_rows, args.grid_cols),
@@ -647,10 +800,15 @@ def main() -> None:
             grid_cols=args.grid_cols,
             target_rows=args.target_rows,
             target_cols=args.target_cols,
+            ramp_shape=args.ramp_shape,
         ),
     )
 
-    with atommovrController(sw, hw, strategy=args.strategy) as ctrl:
+    strategy_arg = args.strategy if args.backend == "legacy_dds" else None
+
+    with atommovrController(
+        sw, hw, backend=args.backend, strategy=strategy_arg
+    ) as ctrl:
         try:
             success = ctrl.run()
             sys.exit(0 if success else 1)
@@ -660,4 +818,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    _configure_logging()
     main()

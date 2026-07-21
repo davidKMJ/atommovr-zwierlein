@@ -2,11 +2,10 @@
 
 ## Overview
 
-The **ramp strategy** uses the FPGA's built-in `frequency_slope()` register
-to autonomously sweep DDS core frequencies at a computed rate (Hz/s).
-Instead of the abrupt frequency hops used by the streaming strategy, the
-FPGA interpolates smoothly between start and end frequencies, producing
-continuous atom transport trajectories.
+The **ramp strategy** uses the FPGA's `frequency_slope()` register to
+sweep DDS core frequencies at a computed rate (Hz/s). Instead of the
+abrupt hops used by streaming, the FPGA interpolates between start and
+end frequencies over the travel window.
 
 **Based on**: spcm DDS examples 03, 04, and 12.
 
@@ -44,6 +43,9 @@ The ramp duration equals the batch travel window
 (`AWGBatch.total_duration_s` from `atommovr.utils.timing.travel_duration_s`).
 `HardwareConfig.trigger_timer_s` is the idle / holding TIMER only.
 
+Host wait for a linear ramp is `3 × total_duration_s` (one TIMER period
+per trigger event). Only the middle interval is the transport sweep.
+
 ### Slope Computation
 
 ```
@@ -55,17 +57,18 @@ For a static tone (no motion): `slope = 0`.
 ### S-Curve Ramp (piecewise-linear cosine profile)
 
 When `use_scurve=True`, the linear ramp is replaced by a piecewise-linear
-approximation of a raised-cosine profile (minimum-jerk transport):
+approximation of a raised-cosine profile:
 
 ```
 f(t) = f_start + Δf · (1 − cos(π · t / T)) / 2
 ```
 
-This creates smooth acceleration and deceleration, reducing heating and
-atom loss during transport. The profile is divided into `scurve_segments`
-linear segments (default: 16), each with its own slope value.
+This softens acceleration and deceleration relative to a constant slope.
+The profile is divided into `scurve_segments` linear segments
+(default: 16), each with its own slope value.
 
 **Trigger events**: 1 (init) + N (segments) + 1 (final) = N + 2 total.
+Host wait is `(N + 2) × (total_duration_s / N)`.
 
 ## Configuration
 
@@ -107,59 +110,50 @@ ctrl = atommovrController(
 )
 ```
 
-## ⚠️ Safety Instructions for Experimental Testing
+## Voltage limits
 
-### CRITICAL: Voltage Limits
-
-> **The output amplitude in the script MUST be below 2.0 V.**
->
+> Output amplitude must stay below 2.0 V.
 > `HardwareConfig.max_amplitude_v` defaults to 1.6 V.
-> **NEVER set this above 2.0 V.**
-> Exceeding this limit will damage the AOD amplifier.
+> Exceeding 2.0 V can damage the AOD amplifier.
 
 ### Before Connecting to the AOD
 
-1. **Start with the amplifier output disconnected from the AOD.**
-2. Run the controller script with your chosen ramp parameters.
+1. Start with the amplifier output disconnected from the AOD.
+2. Run the controller with your chosen ramp parameters.
 3. Connect an oscilloscope to the amplifier output.
-4. Verify:
-   - Peak voltage stays below the AOD damage threshold.
-   - Frequency sweep is smooth (no spikes or glitches).
-   - Amplitude remains constant during the ramp.
-5. **Only after verification**, connect the amplifier to the AOD.
+4. Verify peak voltage, a clean frequency sweep, and stable amplitude.
+5. Only after verification, connect the amplifier to the AOD.
 
-### Ramp-Specific Safety Checks
+### Ramp-specific notes
 
-- **Slope magnitude**: Very large slopes can cause transient voltage spikes.
-  Start with moderate slopes (< 200 MHz/s) and increase gradually.
-- **Ramp stepsize**: Very small values (< 100) increase FPGA update rate
-  and may cause timing issues. Default of 1000 is safe.
-- **S-curve segments**: More segments = more trigger events = longer total
-  time. Ensure the total duration doesn't exceed your experimental window.
+- **Slope magnitude**: very large slopes can cause transient glitches.
+  Start moderate and increase gradually.
+- **Ramp stepsize**: very small values (< 100) increase FPGA update rate.
+  Default of 1000 matches the spcm examples.
+- **S-curve segments**: more segments → more trigger events → longer
+  wall-clock wait (`(N+2)/N × travel`). Keep the total within your
+  experimental window.
 
-### Testing Procedure
+### Testing procedure
 
 1. Set `HardwareConfig.max_amplitude_v = 1.0` (conservative start).
 2. Use a single-core test (1×1 grid) to verify basic ramp functionality.
 3. Increase to full grid and verify amplitude budget (40% per channel).
-4. Switch to S-curve and verify smooth transport profile on oscilloscope.
-5. Gradually increase amplitude toward production value (≤ 1.6 V).
+4. Switch to S-curve and check the profile on an oscilloscope.
+5. Increase amplitude toward the production value (≤ 1.6 V).
 
 ## Comparison with Other Strategies
 
 | Property | Streaming | **Ramp** | Pattern | Camera-Triggered |
 |---|---|---|---|---|
 | Frequency transitions | Abrupt hop | **Smooth sweep** | Abrupt hop | Abrupt hop |
-| FIFO underrun risk | Yes | Yes (during prefill) | No | No |
-| Commands per batch | 1 trigger | **3 triggers** (linear) | 3 triggers | 3 triggers |
+| FIFO underrun risk | Yes | Prefill / streaming queue | No | No |
+| Commands per batch | 1 trigger | **3 (linear) / N+2 (S-curve)** | 3 steps | 3 steps |
+| Host wait | 1 × travel | **3 × travel (linear)** | Poll + remainder | Poll + remainder |
 | S-curve support | No | **Yes** | No | No |
-| Software jitter | Timer-paced | **FPGA-driven ramp** | Polled | Hardware-synced |
-| Atom transport quality | Baseline | **Best** | Baseline | Baseline |
 | Complexity | Low | **Medium** | Medium | High |
 
 ## spcm API Reference
-
-Key spcm calls used by this strategy:
 
 ```python
 dds[core].frequency_slope(slope_hz_per_s)  # Set FPGA ramp rate

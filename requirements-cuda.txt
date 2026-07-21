@@ -1,0 +1,8 @@
+# CUDA / SCAPP extras for Spectrum Instrumentation cards.
+# Requires Linux + NVIDIA GPU with CUDA 12.x. Not installable on macOS.
+#
+#   pip install -r requirements-cuda.txt
+#
+# After the normal env install from environment.yml / pyproject.toml.
+cuda-python
+cupy-cuda12x

@@ -2,7 +2,9 @@
 AWG (Arbitrary Waveform Generator) control utilities for the atommovr pipeline.
 
 Converts logical atom ``Move`` objects into RF ramp commands (``AWGBatch``)
-that are executed by Spectrum Instrumentation cards via the spcm DDS interface.
+that are executed by Spectrum Instrumentation cards, either via the SCAPP
+GPU-generation backend (default, ``awg_controller.src.scapp``) or the
+legacy DDS backend (``awg_controller.src.dds_strategies``).
 
 Amplitude unit : percent of full-scale  (sum ≤ 40 % per channel, per manufacturer)
 Frequency unit : Hz
@@ -114,7 +116,6 @@ def validate_hardware_limits(grid_rows: int, grid_cols: int) -> None:
     Intended call sites: controller hardware init and CLI startup.
     For settings objects, prefer :meth:`AODSettings.validate_core_limits`.
     """
-    return  # TODO: implement this properly
     compute_core_assignments(grid_rows, grid_cols)
 
 
@@ -153,6 +154,11 @@ class AODSettings:
     #: the Zwierlein 808 nm / f1=75 / f2=400 / f_obj=28 setup); not used for RF.
     um_per_mhz: float = 6.526
 
+    #: Frequency-ramp shape used by the SCAPP backend for non-static moves
+    #: ("linear" | "scurve").  Ignored by the legacy_dds backend, where ramp
+    #: shape is a per-strategy choice (see dds_strategies.py).
+    ramp_shape: str = "linear"
+
     @property
     def f_spacing_v(self) -> float:
         """Row-axis inter-site frequency step (Hz)."""
@@ -187,21 +193,32 @@ class RFRamp:
     channel : int
         Hardware output channel (0 = V/row AOD, 1 = H/col AOD).
     core : int
-        DDS core index assigned to this tone.
+        legacy_dds backend: real DDS hardware core index
+        (``compute_core_assignments``). scapp backend: mirrors
+        ``tone_index`` (no hardware meaning under SCAPP).
     f_start : float
         Pre-move frequency (Hz) — the current trap position.
     f_end : float
         Post-move frequency (Hz) — the target trap position.
-        This is the value written to the card for the next trigger.
+        This is the value written to the card for the next trigger
+        (legacy_dds) or the endpoint of the GPU-synthesized ramp (scapp).
     amplitude_pct : float
-        Per-core amplitude (%).  All ramps on the same channel must sum
+        Per-tone amplitude (%).  All ramps on the same channel must sum
         to ≤ MAX_AMPLITUDE_PCT_PER_CHANNEL (40 %).
     phase_deg : float
-        Core phase offset (degrees), default 0.
+        Tone phase offset (degrees), default 0.
     duration_s : float
         **Travel** duration (s) for this batch — Chebyshev × spacing /
         ``AOD_speed`` via ``atommovr.utils.timing.travel_duration_s``.
-        Used for DDS TIMER / slopes / host transport waits.
+        Used for DDS TIMER / slopes / host transport waits (legacy_dds)
+        or the GPU ramp-segment duration (scapp).
+    tone_index : int
+        Row index (channel 0) / column index (channel 1) this ramp
+        addresses — a pure software bookkeeping key, always set by
+        ``RFConverter`` to the row/col enumeration index. Used by the
+        SCAPP feeder to track per-tone phase continuity across GPU buffer
+        fills. Default -1 only for ad-hoc ``RFRamp(...)`` constructions
+        that don't care about it (e.g. in tests).
     """
 
     channel: int
@@ -211,6 +228,7 @@ class RFRamp:
     amplitude_pct: float
     phase_deg: float = 0.0
     duration_s: float = 0.0
+    tone_index: int = -1
 
 
 @dataclass
@@ -247,20 +265,43 @@ class RFConverter:
     ----------
     settings : AODSettings
     physical_params : PhysicalParams
+    backend : str
+        ``"scapp"`` (default) or ``"legacy_dds"``.  Determines how
+        ``core_map``/``RFRamp.core`` are populated — see ``core_map``.
     """
 
-    def __init__(self, settings: AODSettings, physical_params: PhysicalParams) -> None:
+    def __init__(
+        self,
+        settings: AODSettings,
+        physical_params: PhysicalParams,
+        backend: str = "scapp",
+    ) -> None:
+        if backend not in ("scapp", "legacy_dds"):
+            raise ValueError(
+                f"Unknown backend {backend!r}; expected 'scapp' or 'legacy_dds'."
+            )
+        self.backend = backend
         self.settings = settings
         self.params = physical_params
 
-        # Compute core assignments.  Falls back to sequential virtual indices
-        # when the grid exceeds single-card limits (simulation / testing).
-        try:
-            self._core_map = compute_core_assignments(
-                settings.grid_rows,
-                settings.grid_cols,
-            )
-        except ValueError:
+        if backend == "legacy_dds":
+            # Real DDS hardware core assignment.  Falls back to sequential
+            # virtual indices when the grid exceeds single-card limits
+            # (simulation / testing).
+            try:
+                self._core_map = compute_core_assignments(
+                    settings.grid_rows,
+                    settings.grid_cols,
+                )
+            except ValueError:
+                self._core_map = {
+                    0: list(range(settings.grid_rows)),
+                    1: list(range(settings.grid_cols)),
+                }
+        else:
+            # scapp: no DDS-core concept — tones are software-summed sines,
+            # so there's no fixed hardware tone-count ceiling. Always
+            # sequential, uncapped.
             self._core_map = {
                 0: list(range(settings.grid_rows)),
                 1: list(range(settings.grid_cols)),
@@ -268,9 +309,12 @@ class RFConverter:
 
     @property
     def core_map(self) -> Dict[int, List[int]]:
-        """Core-index assignments computed at construction time.
+        """Per-channel tone/core index list computed at construction time.
 
-        Used by the controller to call ``dds.cores_on_channel()``.
+        legacy_dds backend: real DDS hardware core indices, used by the
+        controller to call ``dds.cores_on_channel()``. scapp backend:
+        sequential virtual tone indices (identical to ``RFRamp.tone_index``
+        values), with no hardware meaning.
         """
         return self._core_map
 
@@ -320,6 +364,7 @@ class RFConverter:
                     f_start=f,
                     f_end=f,
                     amplitude_pct=amp_v,
+                    tone_index=i,
                 )
             )
         for j, core in enumerate(h_cores):
@@ -331,6 +376,7 @@ class RFConverter:
                     f_start=f,
                     f_end=f,
                     amplitude_pct=amp_h,
+                    tone_index=j,
                 )
             )
         return AWGBatch(ramps=ramps, total_duration_s=0.0)
@@ -404,6 +450,7 @@ class RFConverter:
                     f_end=self._row_to_freq(target_row),
                     amplitude_pct=amp_v,
                     duration_s=duration_s,
+                    tone_index=row_idx,
                 )
             )
         for col_idx, core in enumerate(h_cores):
@@ -421,6 +468,7 @@ class RFConverter:
                     f_end=self._col_to_freq(target_col),
                     amplitude_pct=amp_h,
                     duration_s=duration_s,
+                    tone_index=col_idx,
                 )
             )
 

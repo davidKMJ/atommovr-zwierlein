@@ -45,12 +45,15 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 if TYPE_CHECKING:
     from awg_controller.src.awg_control import AWGBatch, RFRamp
 
-# Optional hardware driver (same guard as atommovr_controller.py)
+# Optional hardware driver (same guard as atommovr_controller.py).
+# Broadened beyond ImportError: an installed-but-driverless `spcm` package
+# raises a bare Exception from spcm_core/pyspcm.py when the vendor driver
+# .so isn't found, not ImportError.
 try:
     import spcm
 
     _HW_AVAILABLE = True
-except ImportError:
+except Exception:
     spcm = None  # type: ignore[assignment]
     _HW_AVAILABLE = False
 

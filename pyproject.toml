@@ -12,19 +12,25 @@ dependencies = [
   "matplotlib",
   "setuptools",
   "imageio==2.36.1",
+  "pillow==11.1.0",
   "opencv-python-headless",
   "seaborn",
-  "scikit-learn"
+  "scikit-learn",
 ]
 
 [project.optional-dependencies]
 dev = [
-  "nox",
   "black",
   "ruff",
   "pytest",
   "pytest-cov",
   "ipykernel",
+]
+# Optional AWG / Spectrum Instrumentation stack. Simulation mode works without these.
+# CUDA/SCAPP extras stay in requirements-cuda.txt (Linux + NVIDIA only).
+hardware = [
+  "spcm",
+  "psutil",
 ]
 
 # =========================
@@ -63,8 +69,8 @@ extend-immutable-calls = [
 # pytest (test framework + coverage)
 # =========================
 [tool.pytest.ini_options]
-testpaths = ["atommovr/tests"]                         # Where to look for tests
-addopts = "--cov=atommovr --cov-report=term-missing"  # Coverage reporting
+testpaths = ["atommovr/tests", "awg_controller/tests"]                 # Where to look for tests
+addopts = "--cov=atommovr --cov=awg_controller --cov-report=term-missing"  # Coverage reporting
 markers = [
   "slow: slow statistical or long-running tests",
   "integration: end-to-end seam tests",

@@ -357,11 +357,93 @@ class TestRFConverter:
     # -- core map simulation fallback --
 
     def test_core_map_fallback_for_large_grids(self):
-        """Grids exceeding hardware limits use virtual sequential indices."""
+        """scapp backend (default) is always sequential/uncapped — no DDS
+        core-count ceiling exists under SCAPP."""
         large = _make_simple_settings(grid_rows=25, grid_cols=8)
         conv = RFConverter(large, PhysicalParams())
+        assert conv.backend == "scapp"
         assert conv.core_map[0] == list(range(25))
         assert conv.core_map[1] == list(range(8))
+
+    def test_legacy_dds_core_map_fallback_for_large_grids(self):
+        """legacy_dds backend falls back to virtual sequential indices when
+        the grid exceeds real single-card DDS core capacity."""
+        large = _make_simple_settings(grid_rows=25, grid_cols=8)
+        conv = RFConverter(large, PhysicalParams(), backend="legacy_dds")
+        assert conv.backend == "legacy_dds"
+        assert conv.core_map[0] == list(range(25))
+        assert conv.core_map[1] == list(range(8))
+
+    def test_legacy_dds_core_map_real_assignment_within_limits(self):
+        """legacy_dds backend uses real (non-contiguous) DDS core indices
+        when the grid is within single-card capacity."""
+        small = _make_simple_settings(grid_rows=8, grid_cols=5)
+        conv = RFConverter(small, PhysicalParams(), backend="legacy_dds")
+        assert conv.core_map[1] == CHANNEL_1_FULL_CORES[:5]
+        assert conv.core_map[0] == CHANNEL_0_EXCLUSIVE_CORES[:8]
+
+
+# =====================================================================
+# 2b. RFConverter dual-backend tests
+# =====================================================================
+
+
+class TestRFConverterBackends:
+    """Verify RFConverter's backend= parameter picks the right core_map
+    scheme and that tone_index is populated identically in both backends."""
+
+    def test_default_backend_is_scapp(self):
+        settings = _make_simple_settings(grid_rows=8, grid_cols=5)
+        conv = RFConverter(settings, PhysicalParams())
+        assert conv.backend == "scapp"
+
+    def test_unknown_backend_raises(self):
+        settings = _make_simple_settings(grid_rows=8, grid_cols=5)
+        with pytest.raises(ValueError, match="backend"):
+            RFConverter(settings, PhysicalParams(), backend="not_a_backend")
+
+    @pytest.mark.parametrize("backend", ["scapp", "legacy_dds"])
+    def test_core_map_shape(self, backend):
+        settings = _make_simple_settings(grid_rows=8, grid_cols=5)
+        conv = RFConverter(settings, PhysicalParams(), backend=backend)
+        assert len(conv.core_map[0]) == 8
+        assert len(conv.core_map[1]) == 5
+
+    def test_scapp_core_map_is_sequential_even_over_dds_capacity(self):
+        """scapp has no DDS core-count ceiling, unlike legacy_dds — the same
+        oversized grid that forces compute_core_assignments to raise is
+        handled natively by scapp."""
+        large = _make_simple_settings(grid_rows=25, grid_cols=8)
+        with pytest.raises(ValueError):
+            compute_core_assignments(25, 8)
+
+        conv = RFConverter(large, PhysicalParams(), backend="scapp")
+        assert conv.core_map[0] == list(range(25))
+        assert conv.core_map[1] == list(range(8))
+
+    def test_legacy_dds_core_map_uses_real_core_numbers(self):
+        small = _make_simple_settings(grid_rows=8, grid_cols=5)
+        conv = RFConverter(small, PhysicalParams(), backend="legacy_dds")
+        assert conv.core_map[1] == CHANNEL_1_FULL_CORES[:5]
+        assert conv.core_map[0] == CHANNEL_0_EXCLUSIVE_CORES[:8]
+        # scapp, by contrast, is always plain sequential regardless of grid size.
+        conv_scapp = RFConverter(small, PhysicalParams(), backend="scapp")
+        assert conv_scapp.core_map[0] == list(range(8))
+        assert conv_scapp.core_map[1] == list(range(5))
+
+    @pytest.mark.parametrize("backend", ["scapp", "legacy_dds"])
+    def test_tone_index_matches_row_col_enumeration(self, backend):
+        settings = _make_simple_settings(grid_rows=4, grid_cols=3)
+        conv = RFConverter(settings, PhysicalParams(), backend=backend)
+        holding = conv.holding_config()
+        v_ramps = sorted(
+            (r for r in holding.ramps if r.channel == 0), key=lambda r: r.tone_index
+        )
+        h_ramps = sorted(
+            (r for r in holding.ramps if r.channel == 1), key=lambda r: r.tone_index
+        )
+        assert [r.tone_index for r in v_ramps] == list(range(4))
+        assert [r.tone_index for r in h_ramps] == list(range(3))
 
 
 # =====================================================================
@@ -650,6 +732,22 @@ class TestDataClasses:
         ramp = RFRamp(channel=0, core=5, f_start=60e6, f_end=70e6, amplitude_pct=4.0)
         assert ramp.phase_deg == 0.0
         assert ramp.duration_s == 0.0
+        assert ramp.tone_index == -1
+
+    def test_rf_converter_ramps_carry_real_tone_index(self):
+        """RFConverter-produced ramps always carry a real (non-default)
+        tone_index matching their row/col enumeration position."""
+        settings = _make_simple_settings(grid_rows=4, grid_cols=3)
+        conv = RFConverter(settings, PhysicalParams())
+        holding = conv.holding_config()
+        v_ramps = sorted(
+            (r for r in holding.ramps if r.channel == 0), key=lambda r: r.tone_index
+        )
+        h_ramps = sorted(
+            (r for r in holding.ramps if r.channel == 1), key=lambda r: r.tone_index
+        )
+        assert [r.tone_index for r in v_ramps] == list(range(4))
+        assert [r.tone_index for r in h_ramps] == list(range(3))
 
     def test_awg_batch_construction(self):
         ramps = [
@@ -1271,7 +1369,7 @@ class TestStrategyIntegration:
             aod_settings=_make_simple_settings(grid_rows=8, grid_cols=5),
         )
         hw = HardwareConfig()
-        ctrl = atommovrController(sw, hw, strategy=strategy)
+        ctrl = atommovrController(sw, hw, backend="legacy_dds", strategy=strategy)
         yield ctrl
         ctrl.shutdown()
 
@@ -1312,12 +1410,31 @@ class TestStrategyIntegration:
             aod_settings=_make_simple_settings(grid_rows=6, grid_cols=4),
         )
         hw = HardwareConfig()
-        ctrl = atommovrController(sw, hw, strategy="ramp")
+        ctrl = atommovrController(sw, hw, backend="legacy_dds", strategy="ramp")
         assert ctrl.strategy.name == "ramp"
         ctrl.shutdown()
 
     def test_controller_default_strategy(self):
-        """Default strategy should be streaming."""
+        """Default strategy should be streaming when backend='legacy_dds'."""
+        sys.path.insert(0, _SCRIPTS_DIR)
+        from atommovr_controller import (
+            atommovrController,
+            HardwareConfig,
+            SoftwareConfig,
+        )
+
+        sw = SoftwareConfig(
+            physical_params=PhysicalParams(middle_size=[3, 2]),
+            algorithm_name="Hungarian",
+            aod_settings=_make_simple_settings(grid_rows=6, grid_cols=4),
+        )
+        hw = HardwareConfig()
+        ctrl = atommovrController(sw, hw, backend="legacy_dds")
+        assert ctrl.strategy.name == "streaming"
+        ctrl.shutdown()
+
+    def test_controller_default_backend_is_scapp(self):
+        """Default backend should be scapp (no strategy, no DDS core_map)."""
         sys.path.insert(0, _SCRIPTS_DIR)
         from atommovr_controller import (
             atommovrController,
@@ -1332,5 +1449,24 @@ class TestStrategyIntegration:
         )
         hw = HardwareConfig()
         ctrl = atommovrController(sw, hw)
-        assert ctrl.strategy.name == "streaming"
+        assert ctrl.backend == "scapp"
+        assert ctrl.strategy is None
+        assert ctrl.rf_converter.backend == "scapp"
         ctrl.shutdown()
+
+    def test_scapp_backend_rejects_strategy(self):
+        sys.path.insert(0, _SCRIPTS_DIR)
+        from atommovr_controller import (
+            atommovrController,
+            HardwareConfig,
+            SoftwareConfig,
+        )
+
+        sw = SoftwareConfig(
+            physical_params=PhysicalParams(middle_size=[3, 2]),
+            algorithm_name="Hungarian",
+            aod_settings=_make_simple_settings(grid_rows=6, grid_cols=4),
+        )
+        hw = HardwareConfig()
+        with pytest.raises(ValueError):
+            atommovrController(sw, hw, backend="scapp", strategy="streaming")
