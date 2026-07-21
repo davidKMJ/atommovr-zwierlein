@@ -20,7 +20,6 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-  "nox",
   "black",
   "ruff",
   "pytest",
@@ -70,8 +69,8 @@ extend-immutable-calls = [
 # pytest (test framework + coverage)
 # =========================
 [tool.pytest.ini_options]
-testpaths = ["atommovr/tests"]                         # Where to look for tests
-addopts = "--cov=atommovr --cov-report=term-missing"  # Coverage reporting
+testpaths = ["atommovr/tests", "awg_controller/tests"]                 # Where to look for tests
+addopts = "--cov=atommovr --cov=awg_controller --cov-report=term-missing"  # Coverage reporting
 markers = [
   "slow: slow statistical or long-running tests",
   "integration: end-to-end seam tests",
