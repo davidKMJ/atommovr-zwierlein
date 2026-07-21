@@ -49,7 +49,7 @@ awg_controller/
 │   ├── dds_strategies.py    # legacy_dds backend: 4 DDS strategy classes + registry
 │   ├── camera.py            # Camera ABC, RealArrayCamera, OfflineArrayCamera
 │   ├── offline_camera.py    # Compatibility shim → camera.py
-│   └── session_recorder.py  # Optional stage dumps / rounds.jsonl / GIFs
+│   └── session_recorder.py  # Optional stage dumps / rounds.jsonl / GIFs / spectrograms
 ├── scripts/
 │   ├── atommover_controller.py  # Closed-loop feedback controller
 │   └── atommovr_controller.py   # Compatibility shim → atommover_controller
@@ -157,6 +157,25 @@ recorder = SessionRecorder(out_dir="session_out", enabled=True)
 with atommovrController(sw, hw, recorder=recorder) as ctrl:  # backend="scapp" (default)
     ctrl.run()
 ```
+
+It can also save a per-round spectrogram of the synthesized AWG output
+waveform (re-derived from each round's `AWGBatch` ramps via
+`scapp.synthesize_round_waveform`, using the same phase-continuous math the
+scapp GPU feeder uses) — off by default since it needs `scipy`/`matplotlib`
+and re-synthesizes the full waveform:
+
+```python
+from awg_controller.src.session_recorder import SessionRecorder, SpectrogramOptions
+
+recorder = SessionRecorder(
+    out_dir="session_out",
+    enabled=True,
+    spectrogram=SpectrogramOptions(enabled=True, channel_labels={0: "V/row", 1: "H/col"}),
+)
+```
+
+Writes `round_{rr:02d}_spectrogram/spectrogram.png` (and raw
+`waveform_ch{n}.npy`) each round.
 
 ## Usage
 
@@ -295,4 +314,5 @@ Built on the [spcm Python driver](https://github.com/SpectrumInstrumentation/spc
   Without it, `scapp` falls back to simulation mode like `spcm` does.
 - **Algorithms & imaging**: `atommovr.algorithms`, `atommovr.utils` (parent package)
 - **Tests**: `pytest`, `numpy`, `scipy` (phase-integral regression tests)
-- **Optional**: `cv2` for PNG / GIF writing in `SessionRecorder`
+- **Optional**: `cv2` for PNG / GIF writing in `SessionRecorder`; `matplotlib`/`scipy`
+  (already parent-package deps) for `SessionRecorder.save_spectrogram`

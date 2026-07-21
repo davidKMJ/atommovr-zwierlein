@@ -99,6 +99,7 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
+
 @dataclass
 class HardwareConfig:
     """Spectrum Instrumentation card configuration (mirrors cli.py defaults).
@@ -610,6 +611,16 @@ class atommovrController:
                 log.info(
                     f"Round {r}: {n_moves} moves → {len(rf_batches)} hardware batches."
                 )
+
+                if recorder is not None:
+                    recorder.save_spectrogram(
+                        rf_batches,
+                        sample_rate_hz=recorder.spectrogram.sample_rate_hz
+                        or 4.0
+                        * max(
+                            self.sw.aod_settings.f_max_v, self.sw.aod_settings.f_max_h
+                        ),
+                    )
 
                 for batch in rf_batches:
                     self._output_batch(batch)
