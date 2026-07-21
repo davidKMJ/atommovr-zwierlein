@@ -9,11 +9,13 @@ Writes:
 * per-stage folders: ``round_{rr:02d}_{stage}/frame.png``, ``occupancy.npy``, …
 * append-only ``rounds.jsonl`` for move / RF statistics
 * optional GIFs: ``frames.gif`` / ``occupancy.gif`` (see :class:`GifOptions`)
+* optional per-round AWG output spectrograms (see :class:`SpectrogramOptions`)
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -21,6 +23,8 @@ from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence, Tuple, Union
 
 import numpy as np
+
+log = logging.getLogger(__name__)
 
 PathLike = Union[str, Path]
 
@@ -180,6 +184,45 @@ class GifOptions:
     auto_write: bool = True
 
 
+@dataclass
+class SpectrogramOptions:
+    """Customization for optional per-round AWG output spectrograms.
+
+    Off by default — unlike ``GifOptions``, this re-synthesizes the full
+    per-channel time-domain waveform for every ramp in a round
+    (``awg_controller.src.scapp.synthesize_round_waveform``) and needs
+    ``scipy``/``matplotlib``, so it is heavier than the other
+    :class:`SessionRecorder` outputs.
+
+    Parameters
+    ----------
+    enabled
+        When ``True``, :meth:`SessionRecorder.save_spectrogram` writes a PNG
+        (and raw ``.npy`` waveforms) per round; otherwise it no-ops.
+    sample_rate_hz
+        Synthesis sample rate (Hz). Must exceed 2x the highest AOD tone
+        frequency in play (Nyquist) or the spectrogram will alias. ``None``
+        requires callers to pass ``sample_rate_hz=`` explicitly to
+        ``save_spectrogram`` instead.
+    ramp_shape
+        Frequency-ramp shape used to synthesize non-static moves
+        (``"linear"`` | ``"scurve"``) — should match the AWG backend's
+        actual ramp shape (``AODSettings.ramp_shape`` for scapp).
+    nperseg
+        ``scipy.signal.spectrogram`` window length (samples), clamped to the
+        waveform length if shorter.
+    channel_labels
+        Optional ``{channel: label}`` for subplot titles (e.g.
+        ``{0: "V/row", 1: "H/col"}``); defaults to ``"ch{n}"``.
+    """
+
+    enabled: bool = False
+    sample_rate_hz: Optional[float] = None
+    ramp_shape: str = "linear"
+    nperseg: int = 256
+    channel_labels: Optional[Mapping[int, str]] = None
+
+
 class SessionRecorder:
     """Write stage frames/occupancy and append per-round JSONL stats.
 
@@ -197,6 +240,9 @@ class SessionRecorder:
     gif
         GIF customization. Pass ``GifOptions(enabled=False)`` to skip GIFs, or
         ``None`` for defaults (GIF on, ``detect`` stages, frame+occupancy).
+    spectrogram
+        AWG output spectrogram customization. ``None`` for defaults (off —
+        pass ``SpectrogramOptions(enabled=True, ...)`` to opt in).
     """
 
     def __init__(
@@ -207,9 +253,13 @@ class SessionRecorder:
         run_dir: Optional[PathLike] = None,
         meta: Optional[Mapping[str, Any]] = None,
         gif: Optional[GifOptions] = None,
+        spectrogram: Optional[SpectrogramOptions] = None,
     ) -> None:
         self.enabled = bool(enabled)
         self.gif = gif if gif is not None else GifOptions()
+        self.spectrogram = (
+            spectrogram if spectrogram is not None else SpectrogramOptions()
+        )
         self._round_idx: int = 0
         self.run_dir: Optional[Path] = None
         self._rounds_path: Optional[Path] = None
@@ -233,6 +283,7 @@ class SessionRecorder:
             "created_at": datetime.now(timezone.utc).isoformat(),
             "run_dir": str(self.run_dir.resolve()),
             "gif": asdict(self.gif),
+            "spectrogram": asdict(self.spectrogram),
         }
         if meta:
             payload.update(dict(meta))
@@ -296,6 +347,85 @@ class SessionRecorder:
 
         if self.gif.enabled and self.gif.auto_write:
             self.write_gifs()
+
+        return stage_dir
+
+    def save_spectrogram(
+        self,
+        rf_batches: Sequence[Any],
+        *,
+        sample_rate_hz: Optional[float] = None,
+    ) -> Optional[Path]:
+        """Synthesize this round's per-channel AWG output waveform and save a
+        spectrogram PNG (plus raw ``.npy`` waveforms) under
+        ``round_{rr:02d}_spectrogram/``.
+
+        ``rf_batches`` is the ``List[AWGBatch]`` for one round (e.g. from
+        ``RFConverter.convert_sequence``). No-ops unless both the recorder and
+        ``self.spectrogram.enabled`` are true, or ``rf_batches`` is empty.
+        ``matplotlib``/``scipy`` are soft dependencies of this method only.
+
+        Returns the stage directory, or ``None`` if disabled / skipped.
+        """
+        if not self.enabled or self.run_dir is None or not self.spectrogram.enabled:
+            return None
+        if not rf_batches:
+            return None
+
+        rate = (
+            sample_rate_hz
+            if sample_rate_hz is not None
+            else self.spectrogram.sample_rate_hz
+        )
+        if rate is None:
+            raise ValueError(
+                "sample_rate_hz must be given (pass it to save_spectrogram(...) "
+                "or set SpectrogramOptions.sample_rate_hz)."
+            )
+
+        from awg_controller.src.scapp import synthesize_round_waveform
+
+        waveforms = synthesize_round_waveform(
+            rf_batches, rate, ramp_shape=self.spectrogram.ramp_shape
+        )
+        if not waveforms:
+            return None
+
+        try:
+            import matplotlib
+
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
+            from scipy.signal import spectrogram as _spectrogram
+        except ImportError:
+            log.warning("matplotlib/scipy not available; skipping spectrogram.")
+            return None
+
+        stage_dir = self.run_dir / f"round_{self._round_idx:02d}_spectrogram"
+        stage_dir.mkdir(parents=True, exist_ok=True)
+
+        channels = sorted(waveforms)
+        labels = self.spectrogram.channel_labels or {}
+        fig, axes = plt.subplots(
+            len(channels), 1, figsize=(8, 3 * len(channels)), squeeze=False, sharex=True
+        )
+        for ax, ch in zip(axes[:, 0], channels):
+            samples = waveforms[ch]
+            np.save(stage_dir / f"waveform_ch{ch}.npy", samples)
+            nperseg = min(self.spectrogram.nperseg, max(int(samples.size), 1))
+            if samples.size == 0 or nperseg < 1:
+                continue
+            freqs, times, sxx = _spectrogram(samples, fs=rate, nperseg=nperseg)
+            ax.pcolormesh(
+                times * 1e6, freqs / 1e6, 10 * np.log10(sxx + 1e-300), shading="auto"
+            )
+            ax.set_ylabel(f"{labels.get(ch, f'ch{ch}')}\nfreq (MHz)")
+        axes[-1, 0].set_xlabel("time (µs)")
+        fig.suptitle(f"Round {self._round_idx} AWG output spectrogram")
+        fig.tight_layout()
+        out_path = stage_dir / "spectrogram.png"
+        fig.savefig(out_path, dpi=150)
+        plt.close(fig)
 
         return stage_dir
 

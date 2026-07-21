@@ -45,7 +45,7 @@ import math
 import threading
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Dict, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -165,6 +165,120 @@ def segment_total_phase(seg: ToneSegment, t_local, xp=np):
         + segment_instantaneous_phase(seg, t_local, xp=xp)
         + seg.static_phase_rad
     )
+
+
+def _transition_tone_segments(
+    segments: Dict[Tuple[int, int], ToneSegment],
+    batch: AWGBatch,
+    transition_sample: int,
+    sample_rate_hz: float,
+    ramp_shape: str,
+) -> Dict[Tuple[int, int], ToneSegment]:
+    """Pure (hardware/GPU-free) core of :meth:`ScappFeeder._transition_segments`.
+
+    Computes the next ``{(channel, tone_index): ToneSegment}`` state at
+    ``transition_sample``, carrying each tone's phase continuously across the
+    boundary (see :meth:`ScappFeeder._transition_segments` for why). Factored
+    out so offline waveform synthesis (:func:`synthesize_round_waveform`) can
+    reuse the exact same math without touching feeder state/locks.
+    """
+    shape = "hold" if batch.total_duration_s <= 0 else ramp_shape
+    new_segments: Dict[Tuple[int, int], ToneSegment] = {}
+    for ramp in batch.ramps:
+        key = (ramp.channel, ramp.tone_index)
+        old = segments[key]
+        t_old = (transition_sample - old.start_sample) / sample_rate_hz
+        phase_at_transition = (
+            old.phase_offset_rad
+            + float(segment_instantaneous_phase(old, np.array([t_old]), xp=np)[0])
+        ) % TWO_PI
+        new_segments[key] = ToneSegment(
+            channel=ramp.channel,
+            tone_index=ramp.tone_index,
+            shape=shape,
+            f_start=ramp.f_start,
+            f_end=ramp.f_end,
+            duration_s=batch.total_duration_s,
+            amplitude_pct=ramp.amplitude_pct,
+            phase_offset_rad=phase_at_transition,
+            static_phase_rad=math.radians(ramp.phase_deg),
+            start_sample=transition_sample,
+        )
+    return new_segments
+
+
+def synthesize_round_waveform(
+    batches: Sequence[AWGBatch],
+    sample_rate_hz: float,
+    *,
+    ramp_shape: str = "linear",
+) -> Dict[int, np.ndarray]:
+    """Offline (CPU/numpy) synthesis of the per-channel waveform SCAPP would
+    stream to the card for *batches* played back-to-back.
+
+    Reuses the exact phase-continuous segment math the real-time GPU fill
+    loop uses (:func:`_transition_tone_segments`, :func:`segment_total_phase`)
+    so the result matches what actually reaches the AOD under the scapp
+    backend — this is for offline visualization/analysis (e.g. spectrograms
+    via :meth:`awg_controller.src.session_recorder.SessionRecorder.save_spectrogram`),
+    not part of the real-time fill path itself.
+
+    The first batch's ``f_start`` per tone is treated as the pre-existing
+    hold frequency (mirrors how :meth:`ScappFeeder.start` seeds from the
+    holding batch). Zero-duration batches contribute no samples but still
+    update the carried phase/frequency state.
+
+    Returns ``{channel: samples}``, float64 in roughly ``[-1, 1]`` (sum of
+    unit-amplitude tones scaled by ``amplitude_pct``), one entry per channel
+    seen across *batches*. Empty dict if *batches* is empty.
+    """
+    if not batches:
+        return {}
+
+    segments: Dict[Tuple[int, int], ToneSegment] = {
+        (ramp.channel, ramp.tone_index): ToneSegment(
+            channel=ramp.channel,
+            tone_index=ramp.tone_index,
+            shape="hold",
+            f_start=ramp.f_start,
+            f_end=ramp.f_start,
+            duration_s=0.0,
+            amplitude_pct=ramp.amplitude_pct,
+            phase_offset_rad=0.0,
+            static_phase_rad=math.radians(ramp.phase_deg),
+            start_sample=0,
+        )
+        for ramp in batches[0].ramps
+    }
+
+    channels = sorted({ramp.channel for batch in batches for ramp in batch.ramps})
+    chunks: Dict[int, list] = {ch: [] for ch in channels}
+    next_sample = 0
+
+    for batch in batches:
+        n_samples = int(round(batch.total_duration_s * sample_rate_hz))
+        segments = _transition_tone_segments(
+            segments, batch, next_sample, sample_rate_hz, ramp_shape
+        )
+        if n_samples > 0:
+            abs_sample = next_sample + np.arange(n_samples, dtype=np.int64)
+            for ch in channels:
+                total = np.zeros(n_samples, dtype=np.float64)
+                for (seg_ch, _tone_idx), seg in segments.items():
+                    if seg_ch != ch:
+                        continue
+                    t_local = (abs_sample - seg.start_sample).astype(
+                        np.float64
+                    ) / sample_rate_hz
+                    phase = segment_total_phase(seg, t_local, xp=np)
+                    total = total + np.sin(phase) * (seg.amplitude_pct / 100.0)
+                chunks[ch].append(total)
+            next_sample += n_samples
+
+    return {
+        ch: (np.concatenate(parts) if parts else np.zeros(0, dtype=np.float64))
+        for ch, parts in chunks.items()
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -413,33 +527,15 @@ class ScappFeeder:
         only case that occurs in practice — ``RFConverter`` always emits
         ``phase_deg=0``).
         """
-        shape = "hold" if batch.total_duration_s <= 0 else self._config.ramp_shape
         with self._state_lock:
             transition_sample = self._next_fill_sample
-            new_segments: Dict[Tuple[int, int], ToneSegment] = {}
-            for ramp in batch.ramps:
-                key = (ramp.channel, ramp.tone_index)
-                old = self._active_segments[key]
-                t_old = (transition_sample - old.start_sample) / self._sample_rate_hz
-                phase_at_transition = (
-                    old.phase_offset_rad
-                    + float(
-                        segment_instantaneous_phase(old, np.array([t_old]), xp=np)[0]
-                    )
-                ) % TWO_PI
-                new_segments[key] = ToneSegment(
-                    channel=ramp.channel,
-                    tone_index=ramp.tone_index,
-                    shape=shape,
-                    f_start=ramp.f_start,
-                    f_end=ramp.f_end,
-                    duration_s=batch.total_duration_s,
-                    amplitude_pct=ramp.amplitude_pct,
-                    phase_offset_rad=phase_at_transition,
-                    static_phase_rad=math.radians(ramp.phase_deg),
-                    start_sample=transition_sample,
-                )
-            self._active_segments = new_segments
+            self._active_segments = _transition_tone_segments(
+                self._active_segments,
+                batch,
+                transition_sample,
+                self._sample_rate_hz,
+                self._config.ramp_shape,
+            )
 
     def _sum_channel(
         self, segments: Dict[Tuple[int, int], ToneSegment], channel: int, abs_sample
