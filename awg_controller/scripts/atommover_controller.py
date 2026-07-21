@@ -89,15 +89,23 @@ from awg_controller.src.scapp import (
 from awg_controller.src.session_recorder import SessionRecorder, moves_to_records
 
 #  logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(levelname)-8s  %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler("atommovr_controller.log"),
-    ],
-)
+#  Handler setup only happens when this file is run as the entry point (see
+#  `if __name__ == "__main__":` below) — importing this module as a library
+#  (tests, notebooks, other scripts) must not have the side effect of
+#  configuring the root logger or creating a log file.
 log = logging.getLogger(__name__)
+
+
+def _configure_logging() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s  %(levelname)-8s  %(message)s",
+        handlers=[
+            logging.StreamHandler(sys.stdout),
+            logging.FileHandler("atommovr_controller.log"),
+        ],
+    )
+
 
 @dataclass
 class HardwareConfig:
@@ -800,4 +808,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    _configure_logging()
     main()
