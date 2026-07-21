@@ -7,6 +7,7 @@ import os
 import sys
 
 import numpy as np
+import pytest
 
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if _REPO_ROOT not in sys.path:
@@ -14,13 +15,38 @@ if _REPO_ROOT not in sys.path:
 
 from atommovr.utils.AtomArray import AtomArray
 from atommovr.utils.errormodels import ZeroNoise
+from awg_controller.src.awg_control import AWGBatch, RFRamp
 from awg_controller.src.camera import GaussianCameraConfig, OfflineArrayCamera
 from awg_controller.src.session_recorder import (
     GifOptions,
     SessionRecorder,
+    SpectrogramOptions,
     moves_to_records,
 )
 from atommovr.utils.Move import Move
+
+
+def _two_tone_round(f_end_ch0=75e6, f_end_ch1=65e6, duration_s=5e-6):
+    """A single ``AWGBatch`` moving one tone per channel, for spectrogram tests."""
+    ramps = [
+        RFRamp(
+            channel=0,
+            core=0,
+            f_start=70e6,
+            f_end=f_end_ch0,
+            amplitude_pct=40.0,
+            tone_index=0,
+        ),
+        RFRamp(
+            channel=1,
+            core=0,
+            f_start=60e6,
+            f_end=f_end_ch1,
+            amplitude_pct=40.0,
+            tone_index=0,
+        ),
+    ]
+    return [AWGBatch(ramps=ramps, total_duration_s=duration_s)]
 
 
 class TestSessionRecorder:
@@ -84,9 +110,7 @@ class TestSessionRecorder:
             max_side=64,
             auto_write=False,
         )
-        rec = SessionRecorder(
-            tmp_path, run_dir=tmp_path / "gif_meta", gif=gif
-        )
+        rec = SessionRecorder(tmp_path, run_dir=tmp_path / "gif_meta", gif=gif)
         meta = json.loads((rec.run_dir / "meta.json").read_text())
         assert meta["gif"]["sources"] == ["occupancy"]
         assert meta["gif"]["duration_s"] == 0.25
@@ -143,6 +167,62 @@ class TestSessionRecorder:
         assert rec.finalize() == {}
         assert not (rec.run_dir / "frames.gif").exists()
         assert not (rec.run_dir / "occupancy.gif").exists()
+
+
+class TestSpectrogram:
+    def test_disabled_by_default_is_noop(self, tmp_path):
+        rec = SessionRecorder(tmp_path, run_dir=tmp_path / "spec_off")
+        rec.begin_round(0)
+        assert rec.save_spectrogram(_two_tone_round(), sample_rate_hz=20e6) is None
+        assert not (rec.run_dir / "round_00_spectrogram").exists()
+
+    def test_empty_batches_is_noop(self, tmp_path):
+        rec = SessionRecorder(
+            tmp_path,
+            run_dir=tmp_path / "spec_empty",
+            spectrogram=SpectrogramOptions(enabled=True),
+        )
+        rec.begin_round(0)
+        assert rec.save_spectrogram([], sample_rate_hz=20e6) is None
+
+    def test_missing_sample_rate_raises(self, tmp_path):
+        rec = SessionRecorder(
+            tmp_path,
+            run_dir=tmp_path / "spec_no_rate",
+            spectrogram=SpectrogramOptions(enabled=True),
+        )
+        rec.begin_round(0)
+        with pytest.raises(ValueError):
+            rec.save_spectrogram(_two_tone_round())
+
+    def test_writes_png_and_waveforms(self, tmp_path):
+        rec = SessionRecorder(
+            tmp_path,
+            run_dir=tmp_path / "spec_on",
+            spectrogram=SpectrogramOptions(
+                enabled=True, nperseg=32, channel_labels={0: "V/row", 1: "H/col"}
+            ),
+        )
+        rec.begin_round(2)
+        stage_dir = rec.save_spectrogram(_two_tone_round(), sample_rate_hz=20e6)
+        assert stage_dir is not None
+        assert stage_dir.name == "round_02_spectrogram"
+        assert (stage_dir / "spectrogram.png").is_file()
+        wf0 = np.load(stage_dir / "waveform_ch0.npy")
+        wf1 = np.load(stage_dir / "waveform_ch1.npy")
+        assert wf0.shape == wf1.shape == (100,)  # 5us * 20MHz
+        assert np.max(np.abs(wf0)) <= 0.40 + 1e-9  # amplitude_pct/100 ceiling
+
+    def test_default_sample_rate_from_options(self, tmp_path):
+        rec = SessionRecorder(
+            tmp_path,
+            run_dir=tmp_path / "spec_default_rate",
+            spectrogram=SpectrogramOptions(enabled=True, sample_rate_hz=20e6),
+        )
+        rec.begin_round(0)
+        stage_dir = rec.save_spectrogram(_two_tone_round())
+        assert stage_dir is not None
+        assert (stage_dir / "spectrogram.png").is_file()
 
 
 class TestCameraRecorderHook:
@@ -230,11 +310,11 @@ class TestControllerOwnsRecorder:
             error_model=ZeroNoise(seed=3),
             aod_settings=AODSettings(grid_rows=rows, grid_cols=cols),
         )
-        with atommovrController(
-            sw, HardwareConfig(), camera=cam, recorder=rec
-        ) as ctrl:
+        with atommovrController(sw, HardwareConfig(), camera=cam, recorder=rec) as ctrl:
             assert ctrl.recorder is rec
-            assert not hasattr(cam, "recorder") or getattr(cam, "recorder", None) is None
+            assert (
+                not hasattr(cam, "recorder") or getattr(cam, "recorder", None) is None
+            )
             ok = ctrl.run()
 
         assert (rec.run_dir / "meta.json").is_file()

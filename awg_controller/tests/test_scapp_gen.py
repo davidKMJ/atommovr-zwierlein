@@ -32,6 +32,7 @@ from awg_controller.src.scapp import (
     ToneSegment,
     segment_instantaneous_phase,
     segment_total_phase,
+    synthesize_round_waveform,
 )
 
 
@@ -258,6 +259,74 @@ class TestScappFeederPhaseContinuity:
         feeder._seed_segments(_single_tone_batch(70e6, 70e6, 0.0))
         feeder._transition_segments(_single_tone_batch(70e6, 70e6, 0.0))
         assert feeder._active_segments[(0, 0)].shape == "hold"
+
+
+# =====================================================================
+# 2b. Offline waveform synthesis (for spectrogram visualization)
+# =====================================================================
+
+
+class TestSynthesizeRoundWaveform:
+    def test_empty_batches_returns_empty_dict(self):
+        assert synthesize_round_waveform([], sample_rate_hz=1e6) == {}
+
+    def test_sample_counts_match_durations(self):
+        batches = [
+            _single_tone_batch(70e6, 70e6, 2e-6),
+            _single_tone_batch(70e6, 90e6, 3e-6),
+        ]
+        waveforms = synthesize_round_waveform(batches, sample_rate_hz=10e6)
+        assert set(waveforms) == {0}
+        assert waveforms[0].shape == (50,)  # (2+3)us * 10MHz
+
+    def test_hold_tone_is_a_pure_sinusoid_at_f_end(self):
+        f = 70e6
+        rate = 1e9
+        batches = [_single_tone_batch(f, f, 2e-6)]
+        waveforms = synthesize_round_waveform(batches, sample_rate_hz=rate)
+        samples = waveforms[0]
+        t = np.arange(samples.size) / rate
+        expected = 0.40 * np.sin(TWO_PI * f * t)
+        np.testing.assert_allclose(samples, expected, atol=1e-9)
+
+    def test_multi_channel_batches_produce_one_waveform_per_channel(self):
+        ramp0 = RFRamp(
+            channel=0,
+            core=0,
+            f_start=70e6,
+            f_end=80e6,
+            amplitude_pct=40.0,
+            tone_index=0,
+        )
+        ramp1 = RFRamp(
+            channel=1,
+            core=0,
+            f_start=60e6,
+            f_end=65e6,
+            amplitude_pct=40.0,
+            tone_index=0,
+        )
+        batches = [AWGBatch(ramps=[ramp0, ramp1], total_duration_s=1e-6)]
+        waveforms = synthesize_round_waveform(batches, sample_rate_hz=10e6)
+        assert set(waveforms) == {0, 1}
+        assert waveforms[0].shape == waveforms[1].shape == (10,)
+        assert not np.allclose(waveforms[0], waveforms[1])
+
+    def test_phase_continuous_across_batch_boundary(self):
+        """The waveform's own instantaneous phase (not just the underlying
+        ToneSegment bookkeeping already covered by
+        TestScappFeederPhaseContinuity) must not jump at a batch boundary."""
+        rate = 1e9
+        batches = [
+            _single_tone_batch(70e6, 70e6, 1e-6),
+            _single_tone_batch(70e6, 90e6, 1e-6),
+        ]
+        samples = synthesize_round_waveform(batches, sample_rate_hz=rate)[0]
+        boundary = int(round(1e-6 * rate))
+        # Consecutive-sample deltas should be small everywhere, including
+        # right at the boundary — a phase jump would show up as an outlier.
+        deltas = np.abs(np.diff(samples))
+        assert deltas[boundary - 1] < 5 * np.median(deltas) + 1e-3
 
 
 # =====================================================================
