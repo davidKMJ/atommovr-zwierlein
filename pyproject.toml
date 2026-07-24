@@ -16,8 +16,6 @@ dependencies = [
   "opencv-python-headless",
   "seaborn",
   "scikit-learn",
-  "pyvisa",
-  "pyvisa-py",
 ]
 
 [project.optional-dependencies]
