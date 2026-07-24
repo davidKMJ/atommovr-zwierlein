@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Dict
 import os
 import numpy as np
 import matplotlib.pyplot as plt
@@ -8,6 +8,18 @@ from atommovr.utils.imaging.generation import generate_gaussian_image_from_binar
 from atommovr.utils.imaging.extraction import BlobDetection
 from atommovr.utils.Move import Move
 from atommovr.utils.move_utils import MoveType
+
+#: (color, marker size, linewidth, zorder, label) per failure-marker kind,
+#: shared by _draw_grid_panel. zorder matches the original per-marker
+#: values (crossed/collision drawn above the others).
+_FAILURE_MARKER_STYLE: Dict[str, Tuple[str, int, float, int, str]] = {
+    "pickup": ("gold", 40, 1.8, 12, "pickup fail"),
+    "putdown": ("magenta", 40, 1.8, 12, "putdown fail"),
+    "noatom": ("gray", 36, 1.6, 12, "no atom"),
+    "crossed": ("red", 44, 2.0, 13, "crossed"),
+    "collision": ("black", 44, 2.0, 13, "collision"),
+    "eject": ("lime", 40, 1.8, 12, "eject"),
+}
 
 
 def _resolve_grid_dims(n_plots: int, max_cols: Optional[int]) -> tuple[int, int]:
@@ -27,28 +39,26 @@ def _resolve_grid_dims(n_plots: int, max_cols: Optional[int]) -> tuple[int, int]
     return nrows, ncols
 
 
-def visualize_move_batches(
-    atom_array,
-    move_batches: List[List[Move]],
-    save_path: Optional[str] = None,
-    title_suffix: str = "",
-    max_cols: int = 3,
-):
-    """
-    Visualize batched moves (as returned by algorithms) over the lattice.
+def _init_failure_markers() -> Dict[str, List[Tuple[int, int]]]:
+    return {key: [] for key in _FAILURE_MARKER_STYLE}
 
-    - Subplot 0 shows the initial occupancy.
-    - Subplot k>0 shows state after batch k with red arrows for that batch.
 
-    Parameters
-    - atom_array: `AtomArray` instance (used to get initial state and shape)
-    - move_batches: list of lists of `Move`
-    - save_path: optional output path. If None, saves to
-      `figs/resorting/{title_suffix}.svg`.
-    - title_suffix: appended to the filename/title for disambiguation.
-    - max_cols: maximum subplot columns per figure.
+def _simulate_move_batches(atom_array, move_batches: List[List[Move]]) -> Tuple[
+    List[np.ndarray],
+    List[List[Tuple[Tuple[int, int], Tuple[int, int]]]],
+    List[Dict[str, List[Tuple[int, int]]]],
+]:
+    """Replay *move_batches* against a scratch copy of *atom_array* through
+    the real (collision/failure-aware) ``AtomArray.move_atoms`` — the
+    simulation shared by every panel/frame renderer in this module.
+
+    Returns ``(snapshots, movements_per_step, failures_per_step)``:
+    ``snapshots[0]`` is the initial occupancy; ``snapshots[k]`` (``k>=1``)
+    is the state after ``move_batches[k-1]``. ``movements_per_step`` /
+    ``failures_per_step`` are 0-indexed per batch (length
+    ``len(move_batches)``, one entry per transition — one shorter than
+    ``snapshots``).
     """
-    # Simulate batches using AtomArray logic to reflect collisions/ejections accurately.
     try:
         from atommovr.utils.AtomArray import AtomArray as _AA
     except Exception:
@@ -67,21 +77,11 @@ def visualize_move_batches(
         sim = None
 
     snapshots: List[np.ndarray] = [M.copy()]
-    movements_per_step: List[List[tuple[tuple[int, int], tuple[int, int]]]] = []
-    failures_per_step: List[dict[str, List[tuple[int, int]]]] = []
-
-    def _init_failure_markers() -> dict[str, List[tuple[int, int]]]:
-        return {
-            "pickup": [],
-            "putdown": [],
-            "noatom": [],
-            "crossed": [],
-            "collision": [],
-            "eject": [],
-        }
+    movements_per_step: List[List[Tuple[Tuple[int, int], Tuple[int, int]]]] = []
+    failures_per_step: List[Dict[str, List[Tuple[int, int]]]] = []
 
     for batch in move_batches:
-        intended: List[tuple[tuple[int, int], tuple[int, int]]] = []
+        intended: List[Tuple[Tuple[int, int], Tuple[int, int]]] = []
         for mv in batch:
             if isinstance(mv, Move):
                 intended.append(
@@ -134,17 +134,111 @@ def visualize_move_batches(
                         next_state[tr, tc] = 1
 
         # Determine realized moves using pre-batch legality to avoid drawing skip-overs
-        realized: List[tuple[tuple[int, int], tuple[int, int]]] = []
-        for (fr, fc), (tr, tc) in intended:
-            realized.append(((fr, fc), (tr, tc)))
+        realized: List[Tuple[Tuple[int, int], Tuple[int, int]]] = list(intended)
 
         snapshots.append(next_state)
         movements_per_step.append(realized)
         failures_per_step.append(failure_markers)
 
+    return snapshots, movements_per_step, failures_per_step
+
+
+def _draw_grid_panel(
+    ax,
+    state_mat: np.ndarray,
+    R: int,
+    C: int,
+    *,
+    title: str,
+    moves: Optional[List[Tuple[Tuple[int, int], Tuple[int, int]]]] = None,
+    failure_markers: Optional[Dict[str, List[Tuple[int, int]]]] = None,
+    fontsize: int = 8,
+) -> None:
+    """Draw one lattice-occupancy panel (atoms + move arrows + failure
+    markers) into *ax* — the single-panel drawing logic shared by
+    :func:`visualize_move_batches` (one panel per subplot in a grid figure)
+    and :func:`render_move_batch_frames` (one panel per standalone GIF
+    frame).
+    """
+    ax.set_xlim(-0.5, C - 0.5)
+    ax.set_ylim(-0.5, R - 0.5)
+    ax.set_xticks(range(C))
+    ax.set_yticks(range(R))
+    ax.set_aspect("equal")
+    ax.invert_yaxis()
+    ax.grid(True)
+    ax.tick_params(labelsize=6)
+
+    rs, cs = np.where(state_mat == 1)
+    ax.plot(list(cs), list(rs), "bo", markersize=6, zorder=2)
+    ax.set_title(title, fontsize=fontsize)
+
+    if moves:
+        for (r0, c0), (r1, c1) in moves:
+            # Clamp arrow head if destination is out-of-bounds (ejection)
+            in_bounds = 0 <= r1 < R and 0 <= c1 < C
+            rr = r1 if in_bounds else min(max(r1, 0), R - 1)
+            cc = c1 if in_bounds else min(max(c1, 0), C - 1)
+            ax.annotate(
+                "",
+                xy=(cc, rr),
+                xytext=(c0, r0),
+                arrowprops=dict(
+                    arrowstyle="->",
+                    color="r",
+                    linewidth=1.2,
+                    linestyle="dashed" if not in_bounds else "solid",
+                ),
+                zorder=10,
+            )
+
+    if failure_markers:
+        for key, (color, size, lw, zorder, label) in _FAILURE_MARKER_STYLE.items():
+            coords = failure_markers.get(key)
+            if not coords:
+                continue
+            xs = [c for _, c in coords]
+            ys = [r for r, _ in coords]
+            ax.scatter(
+                xs,
+                ys,
+                marker="x",
+                color=color,
+                s=size,
+                linewidths=lw,
+                zorder=zorder,
+                label=label,
+            )
+
+
+def visualize_move_batches(
+    atom_array,
+    move_batches: List[List[Move]],
+    save_path: Optional[str] = None,
+    title_suffix: str = "",
+    max_cols: int = 3,
+):
+    """
+    Visualize batched moves (as returned by algorithms) over the lattice.
+
+    - Subplot 0 shows the initial occupancy.
+    - Subplot k>0 shows state after batch k with red arrows for that batch.
+
+    Parameters
+    - atom_array: `AtomArray` instance (used to get initial state and shape)
+    - move_batches: list of lists of `Move`
+    - save_path: optional output path. If None, saves to
+      `figs/resorting/{title_suffix}.svg`.
+    - title_suffix: appended to the filename/title for disambiguation.
+    - max_cols: maximum subplot columns per figure.
+    """
+    snapshots, movements_per_step, failures_per_step = _simulate_move_batches(
+        atom_array, move_batches
+    )
     n_plots = len(snapshots)
     if n_plots == 0:
         return
+    R, C = snapshots[0].shape
 
     nrows, ncols = _resolve_grid_dims(n_plots, max_cols)
     figsize = (3 * ncols, 3 * nrows)
@@ -155,122 +249,18 @@ def visualize_move_batches(
         if idx >= n_plots:
             ax.axis("off")
             continue
-        ax.set_xlim(-0.5, C - 0.5)
-        ax.set_ylim(-0.5, R - 0.5)
-        ax.set_xticks(range(C))
-        ax.set_yticks(range(R))
-        ax.set_aspect("equal")
-        ax.invert_yaxis()
-        ax.grid(True)
-        ax.tick_params(labelsize=6)
-
-        state_mat = snapshots[idx]
-        rs, cs = np.where(state_mat == 1)
-        ax.plot(list(cs), list(rs), "bo", markersize=6, zorder=2)
-
         title = "Initial" if idx == 0 else f"Step {idx}"
-        ax.set_title(title, fontsize=8)
-
-        if idx > 0:
-            moves = movements_per_step[idx - 1]
-            for (r0, c0), (r1, c1) in moves:
-                # Clamp arrow head if destination is out-of-bounds (ejection)
-                in_bounds = 0 <= r1 < R and 0 <= c1 < C
-                rr = r1 if in_bounds else min(max(r1, 0), R - 1)
-                cc = c1 if in_bounds else min(max(c1, 0), C - 1)
-                style = "->" if in_bounds else "->"
-                ax.annotate(
-                    "",
-                    xy=(cc, rr),
-                    xytext=(c0, r0),
-                    arrowprops=dict(
-                        arrowstyle=style,
-                        color="r",
-                        linewidth=1.2,
-                        linestyle="dashed" if not in_bounds else "solid",
-                    ),
-                    zorder=10,
-                )
-
-            failure_markers = failures_per_step[idx - 1]
-            if failure_markers["pickup"]:
-                xs = [c for _, c in failure_markers["pickup"]]
-                ys = [r for r, _ in failure_markers["pickup"]]
-                ax.scatter(
-                    xs,
-                    ys,
-                    marker="x",
-                    color="gold",
-                    s=40,
-                    linewidths=1.8,
-                    zorder=12,
-                    label="pickup fail",
-                )
-            if failure_markers["putdown"]:
-                xs = [c for _, c in failure_markers["putdown"]]
-                ys = [r for r, _ in failure_markers["putdown"]]
-                ax.scatter(
-                    xs,
-                    ys,
-                    marker="x",
-                    color="magenta",
-                    s=40,
-                    linewidths=1.8,
-                    zorder=12,
-                    label="putdown fail",
-                )
-            if failure_markers["noatom"]:
-                xs = [c for _, c in failure_markers["noatom"]]
-                ys = [r for r, _ in failure_markers["noatom"]]
-                ax.scatter(
-                    xs,
-                    ys,
-                    marker="x",
-                    color="gray",
-                    s=36,
-                    linewidths=1.6,
-                    zorder=12,
-                    label="no atom",
-                )
-            if failure_markers["crossed"]:
-                xs = [c for _, c in failure_markers["crossed"]]
-                ys = [r for r, _ in failure_markers["crossed"]]
-                ax.scatter(
-                    xs,
-                    ys,
-                    marker="x",
-                    color="red",
-                    s=44,
-                    linewidths=2.0,
-                    zorder=13,
-                    label="crossed",
-                )
-            if failure_markers["collision"]:
-                xs = [c for _, c in failure_markers["collision"]]
-                ys = [r for r, _ in failure_markers["collision"]]
-                ax.scatter(
-                    xs,
-                    ys,
-                    marker="x",
-                    color="black",
-                    s=44,
-                    linewidths=2.0,
-                    zorder=13,
-                    label="collision",
-                )
-            if failure_markers["eject"]:
-                xs = [c for _, c in failure_markers["eject"]]
-                ys = [r for r, _ in failure_markers["eject"]]
-                ax.scatter(
-                    xs,
-                    ys,
-                    marker="x",
-                    color="lime",
-                    s=40,
-                    linewidths=1.8,
-                    zorder=12,
-                    label="eject",
-                )
+        moves = movements_per_step[idx - 1] if idx > 0 else None
+        failure_markers = failures_per_step[idx - 1] if idx > 0 else None
+        _draw_grid_panel(
+            ax,
+            snapshots[idx],
+            R,
+            C,
+            title=title,
+            moves=moves,
+            failure_markers=failure_markers,
+        )
 
     for j in range(n_plots, len(axes)):
         axes[j].axis("off")
@@ -283,6 +273,61 @@ def visualize_move_batches(
         os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
     fig.savefig(save_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
+
+
+def render_move_batch_frames(
+    atom_array,
+    move_batches: List[List[Move]],
+    *,
+    figsize: Tuple[float, float] = (4.5, 4.5),
+    dpi: int = 100,
+) -> List[np.ndarray]:
+    """Render each round snapshot (initial state + one frame per move
+    batch — same simulation and per-panel drawing as
+    :func:`visualize_move_batches`) as an independent RGB ``uint8`` array,
+    for animating into a GIF — e.g. via
+    ``awg_controller.src.session_recorder.SessionRecorder.save_move_visualization``.
+
+    Unlike :func:`visualize_move_batches` (one static multi-panel figure),
+    this returns one array per snapshot at a fixed ``figsize``/``dpi`` (so
+    every frame is the same pixel size, required for a valid GIF). Each
+    frame uses a standalone ``Agg``-backed ``Figure``/``FigureCanvasAgg``
+    (not ``matplotlib.pyplot``), so this never touches the process's
+    interactive backend. Returns ``[]`` if *move_batches* is empty.
+    """
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+
+    snapshots, movements_per_step, failures_per_step = _simulate_move_batches(
+        atom_array, move_batches
+    )
+    if not snapshots:
+        return []
+    R, C = snapshots[0].shape
+
+    frames: List[np.ndarray] = []
+    for idx, state_mat in enumerate(snapshots):
+        fig = Figure(figsize=figsize, dpi=dpi, layout="constrained")
+        canvas = FigureCanvasAgg(fig)
+        ax = fig.subplots()
+        title = "Initial" if idx == 0 else f"Step {idx}"
+        moves = movements_per_step[idx - 1] if idx > 0 else None
+        failure_markers = failures_per_step[idx - 1] if idx > 0 else None
+        _draw_grid_panel(
+            ax,
+            state_mat,
+            R,
+            C,
+            title=title,
+            moves=moves,
+            failure_markers=failure_markers,
+            fontsize=11,
+        )
+        canvas.draw()
+        rgba = np.asarray(canvas.buffer_rgba())
+        frames.append(rgba[:, :, :3].copy())
+
+    return frames
 
 
 def visualize_batch_moves_on_image(

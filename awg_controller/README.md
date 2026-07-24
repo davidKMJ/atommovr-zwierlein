@@ -170,7 +170,13 @@ from awg_controller.src.session_recorder import SessionRecorder, SpectrogramOpti
 recorder = SessionRecorder(
     out_dir="session_out",
     enabled=True,
-    spectrogram=SpectrogramOptions(enabled=True, channel_labels={0: "V/row", 1: "H/col"}),
+    spectrogram=SpectrogramOptions(
+        enabled=True,
+        channel_labels={0: "V/row", 1: "H/col"},
+        # Zoom to AOD RF band (controller also passes f_min/f_max from AODSettings).
+        freq_min_hz=82e6,
+        freq_max_hz=118e6,
+    ),
 )
 ```
 

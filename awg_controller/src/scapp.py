@@ -86,6 +86,11 @@ MAX_SAFE_OUTPUT_V: float = 2.0
 #: when the GPU genuinely can't keep up with real time.
 _THROUGHPUT_WARN_INTERVAL_S: float = 5.0
 
+#: Minimum interval between repeated dropped-transition warnings (see
+#: ScappFeeder._maybe_warn_dropped_transition), to avoid log spam when a
+#: whole burst of moves lands inside one notify_samples window.
+_DROPPED_TRANSITION_WARN_INTERVAL_S: float = 5.0
+
 
 # ---------------------------------------------------------------------------
 # Per-tone trajectory + phase math (pure, hardware-free — unit-testable with
@@ -164,6 +169,38 @@ def segment_total_phase(seg: ToneSegment, t_local, xp=np):
         seg.phase_offset_rad
         + segment_instantaneous_phase(seg, t_local, xp=xp)
         + seg.static_phase_rad
+    )
+
+
+def segment_instantaneous_frequency(seg: ToneSegment, t_local, xp=np):
+    """Vectorized instantaneous frequency ``f(t)`` (Hz) for *seg* — the
+    analytical ramp shape a tone is commanded to follow, independent of
+    phase/FFT. Used for the "pure" frequency-vs-time trajectory plot
+    (:func:`synthesize_round_frequency_trajectory`), not the real-time fill
+    loop (which only needs phase, via :func:`segment_total_phase`).
+
+    Unlike phase, frequency is **not cumulative** — it depends only on where
+    ``t_local`` falls within *this* segment's own ``duration_s``, so (unlike
+    :func:`segment_instantaneous_phase`) there's no separate "tail" term:
+    clamping ``t_local`` at ``duration_s`` already lands exactly on
+    ``f_end`` for both ``"linear"`` and ``"scurve"``, and holds there.
+    """
+    if seg.shape == "hold":
+        return t_local * 0.0 + seg.f_end
+
+    duration = seg.duration_s
+    t_c = xp.minimum(t_local, duration)
+
+    if seg.shape == "linear":
+        slope = (seg.f_end - seg.f_start) / duration
+        return seg.f_start + slope * t_c
+
+    if seg.shape == "scurve":
+        delta_f = seg.f_end - seg.f_start
+        return seg.f_start + 0.5 * delta_f * (1.0 - xp.cos(math.pi * t_c / duration))
+
+    raise ValueError(
+        f"Unknown ToneSegment.shape {seg.shape!r}; expected 'hold'/'linear'/'scurve'."
     )
 
 
@@ -281,6 +318,89 @@ def synthesize_round_waveform(
     }
 
 
+def synthesize_round_frequency_trajectory(
+    batches: Sequence[AWGBatch],
+    *,
+    ramp_shape: str = "linear",
+    points_per_batch: int = 64,
+    break_tol_hz: float = 1.0,
+) -> Dict[Tuple[int, int], Tuple[np.ndarray, np.ndarray]]:
+    """Analytical (phase/FFT-free) per-tone frequency trajectory for
+    *batches* played back-to-back — the exact ``f(t)`` ramp shape
+    (:func:`segment_instantaneous_frequency`) each tone is commanded to
+    follow, i.e. the *design intent* rather than the synthesized waveform.
+
+    Distinct from :func:`synthesize_round_waveform`, which sums sine tones
+    for FFT/spectrogram analysis: instantaneous frequency isn't cumulative
+    across batches (unlike phase), so this needs no ``ToneSegment``
+    phase-continuity bookkeeping — each batch's ramp is fully described by
+    its own ``(f_start, f_end, duration_s, shape)``.
+
+    A tone's ``f_start`` in one batch doesn't always match its ``f_end`` in
+    the previous batch it appeared in — e.g. ``RFConverter.convert_moves``
+    rebuilds every non-targeted tone's ramp from its *nominal* resting
+    frequency each batch, regardless of where an earlier batch in the same
+    round actually left it, so a tone that moved once and isn't re-targeted
+    gets a real, physically-commanded frequency jump on the next batch
+    boundary. Drawing a straight connecting line across that jump would
+    misrepresent it as a continuous ramp, so a ``NaN`` separator is inserted
+    into that tone's trajectory instead — matplotlib breaks the line there
+    rather than drawing it.
+
+    Returns ``{(channel, tone_index): (times_s, freqs_hz)}`` spanning the
+    full round (cumulative time across *batches*), one entry per tone seen
+    in *batches* — including non-moving tones, which naturally evaluate flat
+    since ``f_start == f_end`` collapses both ramp shapes to a constant (see
+    :func:`segment_instantaneous_frequency`); callers wanting only moving
+    tones should filter the returned keys themselves (e.g. by checking
+    ``f_start != f_end`` on the corresponding ramps in *batches*).
+    ``points_per_batch`` sets the plotting resolution per batch (a
+    zero-duration/holding batch contributes a single point). ``break_tol_hz``
+    is the mismatch threshold for inserting a break.
+    """
+    trajectories: Dict[Tuple[int, int], Tuple[list, list]] = {}
+    last_f_end: Dict[Tuple[int, int], float] = {}
+    t_offset = 0.0
+    for batch in batches:
+        duration = max(float(batch.total_duration_s), 0.0)
+        shape = "hold" if duration <= 0 else ramp_shape
+        t_local = (
+            np.linspace(0.0, duration, max(int(points_per_batch), 2))
+            if duration > 0
+            else np.zeros(1)
+        )
+        for ramp in batch.ramps:
+            key = (ramp.channel, ramp.tone_index)
+            times_list, freqs_list = trajectories.setdefault(key, ([], []))
+            prev_end = last_f_end.get(key)
+            if prev_end is not None and abs(ramp.f_start - prev_end) > break_tol_hz:
+                times_list.append(np.array([t_offset]))
+                freqs_list.append(np.array([np.nan]))
+
+            seg = ToneSegment(
+                channel=ramp.channel,
+                tone_index=ramp.tone_index,
+                shape=shape,
+                f_start=ramp.f_start,
+                f_end=ramp.f_end,
+                duration_s=duration,
+                amplitude_pct=ramp.amplitude_pct,
+                phase_offset_rad=0.0,
+                static_phase_rad=0.0,
+                start_sample=0,
+            )
+            freqs = segment_instantaneous_frequency(seg, t_local, xp=np)
+            times_list.append(t_offset + t_local)
+            freqs_list.append(freqs)
+            last_f_end[key] = float(ramp.f_end)
+        t_offset += duration
+
+    return {
+        key: (np.concatenate(ts), np.concatenate(fs))
+        for key, (ts, fs) in trajectories.items()
+    }
+
+
 # ---------------------------------------------------------------------------
 # Feeder configuration + thread
 # ---------------------------------------------------------------------------
@@ -288,18 +408,85 @@ def synthesize_round_waveform(
 
 @dataclass
 class ScappFeederConfig:
-    """Tuning knobs for :class:`ScappFeeder`. Defaults mirror the reference
-    SCAPP example (``spcm-examples/10_cuda_scapp/5_scapp_gen_fifo_sine.py``).
+    """Tuning knobs for :class:`ScappFeeder`.
+
+    ``notify_samples`` / ``dma_buffer_samples`` sizing
+    ----------------------------------------------------
+    ``notify_samples`` sets the *only* granularity at which the streamed
+    waveform can change trajectory: :meth:`ScappFeeder._transition_segments`
+    always stamps a new ``submit_batch``/``submit_holding`` at the current
+    ``_next_fill_sample``, which only advances once per completed
+    ``notify_samples``-sized chunk in :meth:`ScappFeeder._fill_loop`. If two
+    ``submit_batch`` calls land within the same chunk period, the second
+    silently overwrites the first's segments before the fill loop ever
+    renders them — the earlier move's chirp never reaches the DAC.
+
+    Move-batch durations here are set by ``atommovr.utils.timing`` (Chebyshev
+    distance × ``PhysicalParams.spacing`` / ``AOD_speed``, floored at
+    ``MIN_MOVE_DURATION_S`` = 1 µs) — for the tutorial's lattice
+    (``spacing=18.07 µm``, ``AOD_speed=6``) that's ~3 µs for a 1-site move,
+    ~15 µs for a 5-site move, ~39 µs for a full 13-site sweep. The reference
+    SCAPP example (``spcm-examples/10_cuda_scapp/5_scapp_gen_fifo_sine.py``)
+    used ``notify_samples = 512 * 1024`` for an always-on 2-tone demo with no
+    latency requirement — at the M4i.6631-x8's 1.25 GS/s max rate
+    (``awg_controller.src.awg_control.M4I_6631_X8_MAX_SAMPLE_RATE_HZ``) that's
+    a ~419 µs chunk period, over 100x longer than a typical move batch here.
+
+    Empirically (see ``dropped_transition_count`` /
+    ``ScappFeeder._maybe_warn_dropped_transition``, and the offline
+    replay-simulation this default was tuned against), an intermediate
+    64 KiS default (~52 µs, matching Spectrum's own largest real-time
+    acquisition+FFT example) still dropped every submission but one in a
+    72-move Hungarian-algorithm round on this tutorial's lattice, once the
+    control loop's `time.sleep()` pacing was made precise enough to
+    approach the moves' nominal ~3 µs cadence (on a real OS the *actual*
+    scheduling granularity of that sleep — not the nominal move duration —
+    is what determines whether this bites; it's easy for that to be
+    optimistic on a well-tuned/real-time system).
+
+    The default below (``1024``, i.e. 1 KiS) drives the notify period down
+    to **~0.82 µs at the M4i.6631-x8's 1.25 GS/s max rate** — under even
+    ``MIN_MOVE_DURATION_S`` (1 µs), and it exactly matches the vendored
+    ``spcm`` package's 4096-byte buffer-alignment quantum (1024 samples ×
+    4 bytes/sample-pair = 4096 B), so it doesn't fight that alignment.
+
+    This is **far below** anything demonstrated in
+    ``spcm-examples/10_cuda_scapp`` (that folder's smallest continuous-FIFO
+    example is 64 KiS; ours is 64x smaller) — going this small trades away
+    the throughput headroom those examples were chosen to preserve. Each
+    fill-loop iteration has fixed per-call overhead (Python/CuPy dispatch,
+    lock acquire, iterating every active tone segment) that doesn't shrink
+    with ``notify_samples``, so 64x more iterations per second could plausibly
+    make that fixed overhead dominate the real-time budget and cause actual
+    GPU/DMA underruns — a different, and likely worse, failure mode than the
+    dropped-transition problem this is meant to fix (a real hardware fault,
+    not just a silently-skipped move). **This value is unverified — it must
+    be validated on real hardware**: watch
+    :meth:`ScappFeeder._maybe_warn_throughput` for real-time-budget warnings
+    and check ``dropped_transition_count`` after a run; raise
+    ``notify_samples`` (in steps, e.g. 2 KiS/4 KiS/8 KiS/64 KiS) if either
+    fires, verifying with an oscilloscope, until both stay clean.
+
+    ``dma_buffer_samples`` must be an **exact multiple** of ``notify_samples``
+    (enforced in ``__post_init__``) — the vendored ``spcm`` package's
+    automatic buffer handling only works correctly under that constraint
+    (see ``spcm/classes_data_transfer.py``: ``_pre_buffer_transfer``'s
+    ``exception_num_samples`` check).
     """
 
-    #: GPU buffer fill block size (samples).
-    notify_samples: int = 512 * 1024
-    #: Total RDMA-pinned DMA buffer size (samples).
+    #: GPU buffer fill block size (samples). See sizing discussion above —
+    #: this is smaller than any precedented spcm-examples/10_cuda_scapp
+    #: value and needs on-hardware throughput validation.
+    notify_samples: int = 1024
+    #: Total RDMA-pinned DMA buffer size (samples); must be an exact
+    #: multiple of ``notify_samples``. ~26.8 ms of underrun cushion at the
+    #: M4i.6631-x8's 1.25 GS/s max rate.
     dma_buffer_samples: int = 32 * 1024 * 1024
     #: card.start() fires once the on-board buffer fill level crosses this
     #: (per-mille, 0-1000), matching the reference example's warm-up gate.
     fill_start_threshold_promille: int = 800
-    #: None -> use the card's maximum sample rate.
+    #: None -> use the card's maximum sample rate (M4i.6631-x8: 1.25 GS/s,
+    #: see ``awg_controller.src.awg_control.M4I_6631_X8_MAX_SAMPLE_RATE_HZ``).
     sample_rate_hz: Optional[float] = None
     #: Default frequency-ramp shape for non-static moves ("linear"|"scurve").
     ramp_shape: str = "linear"
@@ -309,6 +496,16 @@ class ScappFeederConfig:
     fill_time_warn_fraction: float = 0.5
     #: Timeout (s) for feeder-thread startup / shutdown joins.
     join_timeout_s: float = 5.0
+
+    def __post_init__(self) -> None:
+        if self.notify_samples <= 0:
+            raise ValueError("notify_samples must be positive.")
+        if self.dma_buffer_samples % self.notify_samples != 0:
+            raise ValueError(
+                f"dma_buffer_samples ({self.dma_buffer_samples}) must be an "
+                f"exact multiple of notify_samples ({self.notify_samples}) — "
+                "spcm's automatic buffer handling requires this."
+            )
 
 
 class ScappFeeder:
@@ -355,6 +552,14 @@ class ScappFeeder:
         self._max_value: int = 1
         self._sample_dtype = None
         self._last_throughput_warn_s: float = 0.0
+
+        # Dropped-transition detection (see _maybe_warn_dropped_transition):
+        # tracks whether the fill loop has advanced past a submitted
+        # transition's target sample before the *next* submit_batch/
+        # submit_holding call replaces it.
+        self._last_transition_sample: Optional[int] = None
+        self._dropped_transition_count: int = 0
+        self._last_dropped_warn_s: float = 0.0
 
     # ------------------------------------------------------------------
     # Setup / teardown
@@ -460,13 +665,27 @@ class ScappFeeder:
 
     def submit_batch(self, batch: AWGBatch) -> None:
         """Replace the active schedule with *batch*, then block for its
-        travel duration — mirrors the legacy `_output_batch` pacing contract.
+        travel duration plus one ``notify_samples`` window — mirrors the
+        legacy `_output_batch` pacing contract, with the extra margin
+        guarding against the *next* submit_batch/submit_holding call
+        landing on the same ``_next_fill_sample`` "ticket" this one used,
+        before the fill loop has ever rendered it (see
+        :meth:`_transition_segments` / :meth:`_maybe_warn_dropped_transition`
+        for the failure mode this avoids).
+
+        Not an absolute guarantee: the fill loop's real cadence can run
+        slightly behind ``notify_samples / sample_rate_hz`` under load —
+        watch :meth:`_maybe_warn_throughput`. But since a chunk boundary
+        only needs to have been *reached* once (not this batch's segments
+        specifically rendered) for the drop to be avoided, waiting a full
+        extra notify period comfortably covers the common case; check
+        :attr:`dropped_transition_count` after a real run to confirm.
         """
         self._raise_if_failed()
         self._transition_segments(batch)
         self._raise_if_failed()
-        if batch.total_duration_s > 0:
-            time.sleep(batch.total_duration_s)
+        notify_period_s = self._config.notify_samples / self._sample_rate_hz
+        time.sleep(batch.total_duration_s + notify_period_s)
 
     def submit_holding(self, batch: AWGBatch) -> None:
         """Replace the active schedule with the static holding *batch*.
@@ -484,6 +703,16 @@ class ScappFeeder:
     def last_error(self) -> Optional[BaseException]:
         with self._state_lock:
             return self._feeder_exception
+
+    @property
+    def dropped_transition_count(self) -> int:
+        """Cumulative count of submitted transitions overwritten before the
+        fill loop ever rendered them — i.e. moves that never physically
+        reached the DAC because they were submitted faster than one
+        ``notify_samples`` window. See :meth:`_maybe_warn_dropped_transition`.
+        """
+        with self._state_lock:
+            return self._dropped_transition_count
 
     # ------------------------------------------------------------------
     # Internals
@@ -513,6 +742,7 @@ class ScappFeeder:
         with self._state_lock:
             self._active_segments = segments
             self._next_fill_sample = 0
+            self._last_transition_sample = None
 
     def _transition_segments(self, batch: AWGBatch) -> None:
         """Atomically replace every tone's trajectory at the exact start of
@@ -526,9 +756,19 @@ class ScappFeeder:
         whenever the incoming segment's static phase is the same value (the
         only case that occurs in practice — ``RFConverter`` always emits
         ``phase_deg=0``).
+
+        Each chunk the fill loop renders uses a single ``_active_segments``
+        snapshot for its entire ``notify_samples`` span (see ``_fill_loop``)
+        — so if this call's ``transition_sample`` is the same one the
+        *previous* call used, the fill loop cannot have advanced past it in
+        between, meaning the previous call's segments were replaced here
+        before ever being rendered into a chunk: that move never reached the
+        DAC. See :meth:`_maybe_warn_dropped_transition`.
         """
         with self._state_lock:
             transition_sample = self._next_fill_sample
+            self._maybe_warn_dropped_transition(transition_sample)
+            self._last_transition_sample = transition_sample
             self._active_segments = _transition_tone_segments(
                 self._active_segments,
                 batch,
@@ -536,6 +776,43 @@ class ScappFeeder:
                 self._sample_rate_hz,
                 self._config.ramp_shape,
             )
+
+    def _maybe_warn_dropped_transition(self, transition_sample: int) -> None:
+        """Must be called with ``self._state_lock`` already held (from
+        :meth:`_transition_segments`) — not reentrant-safe otherwise.
+
+        Detects the case described in :meth:`_transition_segments`'s
+        docstring: this call's ``transition_sample`` matching the previous
+        call's means the fill loop hasn't advanced past that boundary since,
+        so the previous call's segments are about to be discarded without
+        ever having been rendered. Always counts it; logging itself is
+        throttled (a fast burst of moves can trip this on every single
+        call) — poll :attr:`dropped_transition_count` for the exact total.
+        """
+        if (
+            self._last_transition_sample is None
+            or transition_sample != self._last_transition_sample
+        ):
+            return
+        self._dropped_transition_count += 1
+        now = time.monotonic()
+        if now - self._last_dropped_warn_s < _DROPPED_TRANSITION_WARN_INTERVAL_S:
+            return
+        self._last_dropped_warn_s = now
+        notify_period_us = (
+            self._config.notify_samples / self._sample_rate_hz * 1e6
+            if self._sample_rate_hz
+            else float("nan")
+        )
+        log.warning(
+            "SCAPP feeder: a submitted move's segments were overwritten "
+            "before the fill loop ever rendered them — that move never "
+            f"reached the DAC (dropped_transition_count="
+            f"{self._dropped_transition_count}). Submissions are arriving "
+            f"faster than one notify_samples window ({self._config.notify_samples} "
+            f"samples ≈ {notify_period_us:.1f} µs at the current sample "
+            "rate); consider batching moves or shrinking notify_samples."
+        )
 
     def _sum_channel(
         self, segments: Dict[Tuple[int, int], ToneSegment], channel: int, abs_sample

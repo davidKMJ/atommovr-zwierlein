@@ -29,6 +29,27 @@ from atommovr.utils.timing import MIN_MOVE_DURATION_S, travel_duration_s
 #: must not exceed 40 % of full-scale (manufacturer recommendation).
 MAX_AMPLITUDE_PCT_PER_CHANNEL: float = 40.0
 
+#: Maximum sample rate of the Spectrum Instrumentation M4i.6631-x8 — the
+#: physical card both backends drive (16-bit, 2-channel, PCIe x8 Gen2, 400
+#: MHz bandwidth; see the manufacturer datasheet). ``ScappFeeder.start()``
+#: negotiates this via ``clock.sample_rate(max=True)`` unless
+#: ``ScappFeederConfig.sample_rate_hz`` overrides it. Used as the reference
+#: rate for sizing ``ScappFeederConfig``'s notify/DMA-buffer defaults and,
+#: when no live feeder is attached (sim/offline), as the honest fallback
+#: sample rate for spectrogram synthesis — matching what the real card would
+#: actually negotiate, instead of an arbitrary multiplier of the AOD tone
+#: frequency.
+#:
+#: Note: the card's sustained FIFO/SCAPP streaming throughput over PCIe x8
+#: Gen2 is "in excess of 2.8 GB/s" per the datasheet — at 16-bit/2-channel
+#: that caps sustainable *continuous* streaming around ~700 MHz, well below
+#: this 1.25 GS/s onboard-replay maximum. Continuous SCAPP streaming at the
+#: full 1.25 GS/s on both channels may not be sustainable in practice; this
+#: constant is the correct *ceiling* for offline analysis, but real
+#: `ScappFeederConfig.sample_rate_hz` choices should stay verified against
+#: observed throughput (`ScappFeeder._maybe_warn_throughput`) on real hardware.
+M4I_6631_X8_MAX_SAMPLE_RATE_HZ: float = 1.25e9
+
 #: Total DDS cores on the Spectrum AWG card (21 cores: indices 0-20).
 TOTAL_DDS_CORES: int = 21
 

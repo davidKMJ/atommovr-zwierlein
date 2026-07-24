@@ -16,6 +16,7 @@ atommovr.egg-info
 .DS_Store
 
 # Generated figures / animations
+figs/
 figs/frames/
 figs/*.gif
 figs/*.png

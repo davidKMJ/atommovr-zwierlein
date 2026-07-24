@@ -71,6 +71,7 @@ from atommovr.utils.errormodels import ZeroNoise
 from awg_controller.src.awg_control import (
     AODSettings,
     AWGBatch,
+    M4I_6631_X8_MAX_SAMPLE_RATE_HZ,
     RFConverter,
     validate_hardware_limits,
 )
@@ -133,8 +134,13 @@ class HardwareConfig:
     trigger_timer_s: float = 0.2
 
     #: scapp only: GPU buffer fill block size (samples). See
-    #: ``ScappFeederConfig.notify_samples``.
-    notify_samples: int = 512 * 1024
+    #: ``ScappFeederConfig.notify_samples`` for the derivation (~0.82 µs
+    #: update granularity at the M4i.6631-x8's 1.25 GS/s max rate — below
+    #: even ``MIN_MOVE_DURATION_S``, but far smaller than any precedented
+    #: ``spcm-examples/10_cuda_scapp`` value; unverified on real hardware,
+    #: watch ``ScappFeeder._maybe_warn_throughput`` / ``dropped_transition_count``
+    #: and raise this if either fires).
+    notify_samples: int = 1024
 
     #: scapp only: total RDMA-pinned DMA buffer size (samples). See
     #: ``ScappFeederConfig.dma_buffer_samples``.
@@ -620,14 +626,32 @@ class atommovrController:
                 )
 
                 if recorder is not None:
+                    aod = self.sw.aod_settings
+                    if recorder.spectrogram.sample_rate_hz is not None:
+                        spec_rate = recorder.spectrogram.sample_rate_hz
+                    elif self._feeder is not None:
+                        # Live card attached: mirror the rate actually
+                        # negotiated by ScappFeeder.start() so the offline
+                        # synthesis matches what's physically streamed.
+                        spec_rate = self._feeder.sample_rate_hz
+                    else:
+                        # Sim/offline: the M4i.6631-x8's max rate is what
+                        # ScappFeeder.start() would negotiate on real
+                        # hardware (clock.sample_rate(max=True)) — an honest
+                        # match for the visualization, not an arbitrary
+                        # multiplier of the AOD tone frequency.
+                        spec_rate = M4I_6631_X8_MAX_SAMPLE_RATE_HZ
                     recorder.save_spectrogram(
                         rf_batches,
-                        sample_rate_hz=recorder.spectrogram.sample_rate_hz
-                        or 4.0
-                        * max(
-                            self.sw.aod_settings.f_max_v, self.sw.aod_settings.f_max_h
-                        ),
+                        sample_rate_hz=spec_rate,
+                        freq_min_hz=min(aod.f_min_v, aod.f_min_h),
+                        freq_max_hz=max(aod.f_max_v, aod.f_max_h),
                     )
+                    # self.array here is the pre-move state move_batches was
+                    # computed against — must be called before step 5 below
+                    # mutates it (visualize_* re-simulates the batches
+                    # itself through a scratch copy).
+                    recorder.save_move_visualization(self.array, move_batches)
 
                 for batch in rf_batches:
                     self._output_batch(batch)

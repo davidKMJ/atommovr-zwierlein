@@ -1,4 +1,4 @@
-![atommovr](./figs/logo.svg)
+![atommovr](./doc_figs/logo.svg)
 
 ## A simulation framework for rearrangement in atomic arrays
 
@@ -8,7 +8,7 @@ by [Nikhil Kiran Harle\*](https://github.com/khnikhil/khnikhil), [Bo-Yu Chen\*](
 
 ## Key features and `where to find them`
 
-![overview](/figs/fig1.svg)
+![overview](/doc_figs/fig1.svg)
 
 :books: Open-source library of rearrangement algorithms: `atommovr.algorithms/`
 
