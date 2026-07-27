@@ -1,1 +1,0 @@
-KERNEL=="spcm[0-9]*", MODE="0666"
