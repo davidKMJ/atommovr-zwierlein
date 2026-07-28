@@ -33,6 +33,8 @@ hardware = [
   "psutil",
   "pyvisa",     # SCPI/VISA control for lab instruments (e.g. Siglent SVA1015X)
   "pyvisa-py",  # pure-Python VISA backend; skip if using NI-VISA/Keysight IO Libraries
+  "cuda-python",
+  "cupy-cuda12x"
 ]
 
 # =========================
