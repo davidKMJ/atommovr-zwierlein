@@ -1,4 +1,4 @@
-name: atommovr_env
+name: atommovr
 channels:
     - defaults
     - conda-forge
