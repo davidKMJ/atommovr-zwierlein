@@ -75,6 +75,17 @@ except ImportError:
     cp = None  # type: ignore[assignment]
     _GPU_AVAILABLE = False
 
+if _GPU_AVAILABLE:
+    # Fuses sin+scale+add into a single GPU kernel launch instead of three
+    # (cupy is eager by default). Pure array/scalar arithmetic only -- the
+    # shape-dependent ("hold"/"linear"/"scurve") phase math already happened
+    # in segment_total_phase before this is called, so there's no per-call
+    # branching for cp.fuse to trip over.
+    @cp.fuse()
+    def _accumulate_tone(total, phase, amplitude_frac):
+        return total + cp.sin(phase) * amplitude_frac
+
+
 log = logging.getLogger(__name__)
 
 TWO_PI: float = 2.0 * math.pi
@@ -551,6 +562,7 @@ class ScappFeeder:
         self._sample_rate_hz: float = 0.0
         self._max_value: int = 1
         self._sample_dtype = None
+        self._local_sample_idx = None
         self._last_throughput_warn_s: float = 0.0
 
         # Dropped-transition detection (see _maybe_warn_dropped_transition):
@@ -622,6 +634,11 @@ class ScappFeeder:
         self._scapp_transfer.allocate_buffer(self._config.dma_buffer_samples)
         self._scapp_transfer.start_buffer_transfer(spcm.M2CMD_DATA_STARTDMA)
         self._sample_dtype = self._scapp_transfer.numpy_type()
+
+        # Constant per chunk (only chunk_start shifts each iteration) --
+        # precomputed once instead of relaunching cp.arange every fill
+        # iteration in the real-time loop.
+        self._local_sample_idx = cp.arange(self._config.notify_samples, dtype=cp.int64)
 
         self._seed_segments(initial_holding)
 
@@ -821,11 +838,12 @@ class ScappFeeder:
         for (ch, _tone_idx), seg in segments.items():
             if ch != channel:
                 continue
-            t_local = (abs_sample - seg.start_sample).astype(
-                cp.float64
-            ) / self._sample_rate_hz
+            # abs_sample is int64; dividing by the float sample rate already
+            # promotes to float64 (numpy/cupy true-division rules), so the
+            # explicit .astype(cp.float64) here was a redundant kernel launch.
+            t_local = (abs_sample - seg.start_sample) / self._sample_rate_hz
             phase = segment_total_phase(seg, t_local, xp=cp)
-            total = total + cp.sin(phase) * (seg.amplitude_pct / 100.0)
+            total = _accumulate_tone(total, phase, seg.amplitude_pct / 100.0)
         return total
 
     def _maybe_start_trigger(self) -> None:
@@ -863,9 +881,7 @@ class ScappFeeder:
                     chunk_start = self._next_fill_sample
                     self._next_fill_sample += self._config.notify_samples
 
-                abs_sample = chunk_start + cp.arange(
-                    self._config.notify_samples, dtype=cp.int64
-                )
+                abs_sample = chunk_start + self._local_sample_idx
 
                 ch0 = self._sum_channel(segments, 0, abs_sample) * self._max_value
                 ch1 = self._sum_channel(segments, 1, abs_sample) * self._max_value
