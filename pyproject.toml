@@ -1,6 +1,6 @@
 [project]
 name = "atommovr"
-version = "0.2.0"
+version = "0.3.0"
 description = "Atom transport and error modeling for AOD-based tweezer arrays."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -94,3 +94,8 @@ markers = [
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["atommovr*"]
+
+[dependency-groups]
+dev = [
+  "jupyterlab>=4.6.2",
+]
