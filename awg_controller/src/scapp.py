@@ -75,17 +75,6 @@ except ImportError:
     cp = None  # type: ignore[assignment]
     _GPU_AVAILABLE = False
 
-if _GPU_AVAILABLE:
-    # Fuses sin+scale+add into a single GPU kernel launch instead of three
-    # (cupy is eager by default). Pure array/scalar arithmetic only -- the
-    # shape-dependent ("hold"/"linear"/"scurve") phase math already happened
-    # in segment_total_phase before this is called, so there's no per-call
-    # branching for cp.fuse to trip over.
-    @cp.fuse()
-    def _accumulate_tone(total, phase, amplitude_frac):
-        return total + cp.sin(phase) * amplitude_frac
-
-
 log = logging.getLogger(__name__)
 
 TWO_PI: float = 2.0 * math.pi
@@ -94,8 +83,18 @@ TWO_PI: float = 2.0 * math.pi
 MAX_SAFE_OUTPUT_V: float = 2.0
 
 #: Minimum interval between repeated throughput warnings, to avoid log spam
-#: when the GPU genuinely can't keep up with real time.
+#: when the GPU genuinely can't keep up with real time. Also gates the GPU
+#: stream sync needed to measure elapsed fill-loop time accurately (see
+#: ScappFeeder._maybe_warn_throughput) -- syncing every iteration would
+#: itself cost more than the entire real-time budget at notify_samples=1024.
 _THROUGHPUT_WARN_INTERVAL_S: float = 5.0
+
+#: Minimum interval between amplitude-clipping integrity checks (see
+#: ScappFeeder._maybe_check_clipping). Reading back whether anything
+#: exceeded the amplitude budget requires a host/GPU sync, so -- like the
+#: throughput check -- it's throttled rather than paid every iteration. The
+#: clip itself stays unconditional and is unaffected by this throttling.
+_CLIP_CHECK_INTERVAL_S: float = 5.0
 
 #: Minimum interval between repeated dropped-transition warnings (see
 #: ScappFeeder._maybe_warn_dropped_transition), to avoid log spam when a
@@ -519,6 +518,108 @@ class ScappFeederConfig:
             )
 
 
+@dataclass
+class _ChannelToneArrays:
+    """GPU-resident, precomputed trajectory arrays for every tone active on
+    one channel — rebuilt via :func:`_build_channel_arrays` once per
+    submitted batch (see :meth:`ScappFeeder._seed_segments` /
+    :meth:`ScappFeeder._transition_segments`), *not* once per fill-loop
+    iteration.
+
+    This is what lets :meth:`ScappFeeder._sum_channel` evaluate every active
+    tone's phase in a handful of vectorized GPU ops regardless of tone
+    count, instead of a Python ``for`` loop issuing one GPU kernel launch
+    per tone per iteration. At ``notify_samples=1024`` the real-time budget
+    per fill iteration is under 1 microsecond at the card's max sample rate
+    — far below the fixed dispatch latency of even a single extra kernel
+    launch — so a per-tone loop's overhead scales directly with tone count,
+    and was the dominant way a live grid (dozens of active tones per round)
+    blew that budget and caused a DMA underrun.
+
+    ``is_scurve`` distinguishes only "scurve" from "everything else":
+    "hold" (``duration=0``) and "linear" tones share one formula, because
+    clamping ``t_c = min(t_local, duration)`` makes the linear ramp term
+    evaluate to exactly zero when ``duration=0`` regardless of slope,
+    collapsing it to the same ``tail`` term the standalone "hold" branch in
+    :func:`segment_instantaneous_phase` uses — a closed-form identity, not
+    an approximation (see :func:`_build_channel_arrays`).
+
+    All arrays are shape ``(n_tones, 1)`` (including ``start_sample``) so
+    they broadcast against a ``(1, n_samples)`` sample-index row in
+    :meth:`ScappFeeder._sum_channel` with no per-call reshaping.
+    """
+
+    start_sample: "cp.ndarray"
+    f_start: "cp.ndarray"
+    f_end: "cp.ndarray"
+    duration: "cp.ndarray"
+    safe_duration: "cp.ndarray"
+    slope: "cp.ndarray"
+    delta_f: "cp.ndarray"
+    is_scurve: "cp.ndarray"
+    amplitude_frac: "cp.ndarray"
+    phase_offset: "cp.ndarray"
+    static_phase: "cp.ndarray"
+    n_tones: int
+
+
+def _build_channel_arrays(
+    segments: Dict[Tuple[int, int], ToneSegment], channel: int
+) -> "_ChannelToneArrays":
+    """Pack every :class:`ToneSegment` active on *channel* into the batched,
+    GPU-resident form :class:`_ChannelToneArrays` needs.
+
+    Runs on plain Python/numpy on the way in — segment dicts are small
+    (tens to ~hundreds of tones) and this only runs once per submitted
+    batch, not once per fill iteration — with a single host->device upload
+    per field.
+    """
+    rows = [seg for (ch, _tone_idx), seg in segments.items() if ch == channel]
+    n = len(rows)
+    f_start = np.empty(n, dtype=np.float64)
+    f_end = np.empty(n, dtype=np.float64)
+    duration = np.empty(n, dtype=np.float64)
+    amplitude_frac = np.empty(n, dtype=np.float64)
+    phase_offset = np.empty(n, dtype=np.float64)
+    static_phase = np.empty(n, dtype=np.float64)
+    start_sample = np.empty(n, dtype=np.int64)
+    is_scurve = np.empty(n, dtype=bool)
+    for i, seg in enumerate(rows):
+        f_start[i] = seg.f_start
+        f_end[i] = seg.f_end
+        duration[i] = seg.duration_s
+        amplitude_frac[i] = seg.amplitude_pct / 100.0
+        phase_offset[i] = seg.phase_offset_rad
+        static_phase[i] = seg.static_phase_rad
+        start_sample[i] = seg.start_sample
+        is_scurve[i] = seg.shape == "scurve"
+
+    # np.where avoids a literal 0/0 in the slope division for "hold" tones
+    # (duration=0); the result is discarded anyway since t_c=min(t_local, 0)
+    # zeroes out everything it multiplies (see class docstring).
+    safe_duration = np.where(duration > 0, duration, 1.0)
+    slope = (f_end - f_start) / safe_duration
+    delta_f = f_end - f_start
+
+    def col(a: np.ndarray) -> "cp.ndarray":
+        return cp.asarray(a)[:, None]
+
+    return _ChannelToneArrays(
+        start_sample=col(start_sample),
+        f_start=col(f_start),
+        f_end=col(f_end),
+        duration=col(duration),
+        safe_duration=col(safe_duration),
+        slope=col(slope),
+        delta_f=col(delta_f),
+        is_scurve=col(is_scurve),
+        amplitude_frac=col(amplitude_frac),
+        phase_offset=col(phase_offset),
+        static_phase=col(static_phase),
+        n_tones=n,
+    )
+
+
 class ScappFeeder:
     """Owns the continuous SCAPP GPU buffer-fill loop for one card.
 
@@ -550,6 +651,11 @@ class ScappFeeder:
 
         self._state_lock = threading.Lock()
         self._active_segments: Dict[Tuple[int, int], ToneSegment] = {}
+        # GPU-resident vectorized form of _active_segments, rebuilt whenever
+        # it changes (_seed_segments / _transition_segments) -- see
+        # _ChannelToneArrays / _sum_channel for why the fill loop indexes
+        # into this instead of iterating _active_segments per tone.
+        self._channel_arrays: Dict[int, "_ChannelToneArrays"] = {}
         self._next_fill_sample: int = 0
         self._feeder_exception: Optional[BaseException] = None
 
@@ -572,6 +678,12 @@ class ScappFeeder:
         self._last_transition_sample: Optional[int] = None
         self._dropped_transition_count: int = 0
         self._last_dropped_warn_s: float = 0.0
+
+        # Throttle state for the fill loop's diagnostic checks -- both
+        # gate a GPU stream sync, so they're paid only periodically rather
+        # than every iteration (see _maybe_warn_throughput /
+        # _maybe_check_clipping).
+        self._last_clip_check_s: float = 0.0
 
     # ------------------------------------------------------------------
     # Setup / teardown
@@ -758,6 +870,10 @@ class ScappFeeder:
             )
         with self._state_lock:
             self._active_segments = segments
+            self._channel_arrays = {
+                0: _build_channel_arrays(segments, 0),
+                1: _build_channel_arrays(segments, 1),
+            }
             self._next_fill_sample = 0
             self._last_transition_sample = None
 
@@ -793,6 +909,10 @@ class ScappFeeder:
                 self._sample_rate_hz,
                 self._config.ramp_shape,
             )
+            self._channel_arrays = {
+                0: _build_channel_arrays(self._active_segments, 0),
+                1: _build_channel_arrays(self._active_segments, 1),
+            }
 
     def _maybe_warn_dropped_transition(self, transition_sample: int) -> None:
         """Must be called with ``self._state_lock`` already held (from
@@ -831,20 +951,38 @@ class ScappFeeder:
             "rate); consider batching moves or shrinking notify_samples."
         )
 
-    def _sum_channel(
-        self, segments: Dict[Tuple[int, int], ToneSegment], channel: int, abs_sample
-    ):
-        total = cp.zeros(abs_sample.shape, dtype=cp.float64)
-        for (ch, _tone_idx), seg in segments.items():
-            if ch != channel:
-                continue
-            # abs_sample is int64; dividing by the float sample rate already
-            # promotes to float64 (numpy/cupy true-division rules), so the
-            # explicit .astype(cp.float64) here was a redundant kernel launch.
-            t_local = (abs_sample - seg.start_sample) / self._sample_rate_hz
-            phase = segment_total_phase(seg, t_local, xp=cp)
-            total = _accumulate_tone(total, phase, seg.amplitude_pct / 100.0)
-        return total
+    def _sum_channel(self, arrays: "_ChannelToneArrays", abs_sample):
+        """Vectorized total waveform for one channel: every active tone's
+        phase evaluated in one broadcasted expression instead of a per-tone
+        Python loop issuing a GPU kernel launch per tone (see
+        :class:`_ChannelToneArrays`).
+        """
+        if arrays.n_tones == 0:
+            return cp.zeros(abs_sample.shape, dtype=cp.float64)
+
+        # abs_sample is int64; dividing by the float sample rate already
+        # promotes to float64 (numpy/cupy true-division rules). Broadcasts
+        # (n_tones, 1) start_sample against (1, n_samples) abs_sample to a
+        # (n_tones, n_samples) per-tone-per-sample local time.
+        t_local = (abs_sample[None, :] - arrays.start_sample) / self._sample_rate_hz
+        t_c = cp.minimum(t_local, arrays.duration)
+        tail = TWO_PI * arrays.f_end * cp.maximum(t_local - arrays.duration, 0.0)
+
+        linear_ramp = TWO_PI * (arrays.f_start * t_c + 0.5 * arrays.slope * t_c * t_c)
+        scurve_ramp = TWO_PI * (
+            arrays.f_start * t_c
+            + 0.5
+            * arrays.delta_f
+            * (
+                t_c
+                - (arrays.safe_duration / math.pi)
+                * cp.sin(math.pi * t_c / arrays.safe_duration)
+            )
+        )
+        ramp = cp.where(arrays.is_scurve, scurve_ramp, linear_ramp)
+
+        phase = arrays.phase_offset + ramp + tail + arrays.static_phase
+        return cp.sum(cp.sin(phase) * arrays.amplitude_frac, axis=0)
 
     def _maybe_start_trigger(self) -> None:
         if self._started:
@@ -855,19 +993,52 @@ class ScappFeeder:
             self._started = True
             self._start_event.set()
 
-    def _maybe_warn_throughput(self, elapsed_s: float) -> None:
-        budget_s = self._config.notify_samples / self._sample_rate_hz
-        if elapsed_s <= self._config.fill_time_warn_fraction * budget_s:
-            return
+    def _maybe_warn_throughput(self, t0: float, n_active_tones: int) -> None:
+        """Throttled by ``_THROUGHPUT_WARN_INTERVAL_S`` -- and that throttle
+        gates more than the log call here: getting an accurate ``elapsed_s``
+        requires syncing the GPU stream (all the fill-loop's cupy ops are
+        launched async), and a sync every iteration would itself cost more
+        than the entire real-time budget at ``notify_samples=1024``. So
+        outside the periodic check, this call is a cheap no-op and the loop
+        stays fully async.
+        """
         now = time.monotonic()
         if now - self._last_throughput_warn_s < _THROUGHPUT_WARN_INTERVAL_S:
             return
         self._last_throughput_warn_s = now
+        cp.cuda.get_current_stream().synchronize()
+        elapsed_s = time.perf_counter() - t0
+        budget_s = self._config.notify_samples / self._sample_rate_hz
+        if elapsed_s <= self._config.fill_time_warn_fraction * budget_s:
+            return
         log.warning(
             f"SCAPP fill loop running close to real-time budget: "
             f"{elapsed_s * 1e3:.2f} ms vs {budget_s * 1e3:.2f} ms budget "
-            f"({len(self._active_segments)} active tones)."
+            f"({n_active_tones} active tones)."
         )
+
+    def _maybe_check_clipping(self, ch0_raw, ch1_raw) -> None:
+        """Throttled the same way as :meth:`_maybe_warn_throughput`, and for
+        the same reason: reading back whether anything exceeded the
+        amplitude budget needs a host/GPU sync (``int()`` on a cupy
+        reduction), so it's checked periodically instead of every
+        iteration. This only gates the "should never happen" diagnostic
+        log -- the clip applied in :meth:`_fill_loop` is unconditional and
+        unaffected by this throttling, so the amplitude-safety invariant
+        still holds every single iteration regardless of the check cadence.
+        """
+        now = time.monotonic()
+        if now - self._last_clip_check_s < _CLIP_CHECK_INTERVAL_S:
+            return
+        self._last_clip_check_s = now
+        n_clipped = int(cp.count_nonzero(cp.abs(ch0_raw) > self._max_value)) + int(
+            cp.count_nonzero(cp.abs(ch1_raw) > self._max_value)
+        )
+        if n_clipped:
+            log.error(
+                f"SCAPP fill loop clipped {n_clipped} samples this chunk — "
+                "amplitude-budget invariant violated upstream."
+            )
 
     def _fill_loop(self) -> None:
         try:
@@ -877,31 +1048,28 @@ class ScappFeeder:
 
                 t0 = time.perf_counter()
                 with self._state_lock:
-                    segments = self._active_segments
+                    n_active_tones = len(self._active_segments)
+                    channel_arrays = self._channel_arrays
                     chunk_start = self._next_fill_sample
                     self._next_fill_sample += self._config.notify_samples
 
                 abs_sample = chunk_start + self._local_sample_idx
 
-                ch0 = self._sum_channel(segments, 0, abs_sample) * self._max_value
-                ch1 = self._sum_channel(segments, 1, abs_sample) * self._max_value
+                ch0 = self._sum_channel(channel_arrays[0], abs_sample) * self._max_value
+                ch1 = self._sum_channel(channel_arrays[1], abs_sample) * self._max_value
 
-                n_clipped = int(cp.count_nonzero(cp.abs(ch0) > self._max_value)) + int(
-                    cp.count_nonzero(cp.abs(ch1) > self._max_value)
-                )
-                if n_clipped:
-                    log.error(
-                        f"SCAPP fill loop clipped {n_clipped} samples this chunk — "
-                        "amplitude-budget invariant violated upstream."
-                    )
-                    ch0 = cp.clip(ch0, -self._max_value, self._max_value)
-                    ch1 = cp.clip(ch1, -self._max_value, self._max_value)
+                # Throttled diagnostic read-back (see _maybe_check_clipping);
+                # the clip itself is unconditional so the amplitude-safety
+                # invariant holds every iteration regardless.
+                self._maybe_check_clipping(ch0, ch1)
+                ch0 = cp.clip(ch0, -self._max_value, self._max_value)
+                ch1 = cp.clip(ch1, -self._max_value, self._max_value)
 
                 card_buffer[0, :] = ch0.astype(self._sample_dtype)
                 card_buffer[1, :] = ch1.astype(self._sample_dtype)
 
                 self._maybe_start_trigger()
-                self._maybe_warn_throughput(time.perf_counter() - t0)
+                self._maybe_warn_throughput(t0, n_active_tones)
         except (
             BaseException
         ) as exc:  # noqa: BLE001 - must capture and hand off, not swallow
