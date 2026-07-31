@@ -345,7 +345,7 @@ class atommovrController:
         )
 
         try:
-            self._card = spcm.Card(self.hw.card_path)
+            self._card = spcm.Card(self.hw.card_path).open()
             holding = self.rf_converter.holding_config()
             core_map = self.rf_converter.core_map
 
@@ -393,7 +393,7 @@ class atommovrController:
         ), f"max_amplitude_v={self.hw.max_amplitude_v} exceeds 2.0 V hard safety ceiling"
 
         try:
-            self._card = spcm.Card(self.hw.card_path)
+            self._card = spcm.Card(self.hw.card_path).open()
             self._feeder = ScappFeeder(
                 self._card, self.hw, self.sw.aod_settings, self._scapp_config
             )
