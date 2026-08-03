@@ -403,6 +403,7 @@ def _bare_feeder(
     feeder._state_lock = threading.Lock()
     feeder._sample_rate_hz = sample_rate_hz
     feeder._config = ScappFeederConfig(ramp_shape=ramp_shape)
+    feeder._max_value = 1.0
     feeder._active_segments = {}
     feeder._next_fill_sample = 0
     feeder._feeder_exception = None
@@ -770,3 +771,160 @@ class TestScappFeederSimulationGuard:
             ctrl._send_holding()
         finally:
             ctrl.shutdown()
+
+
+# =====================================================================
+# 5. GPU fill-loop math (numpy-simulated cupy backend)
+# =====================================================================
+
+
+class TestSumChannelMatchesPureMath:
+    """``ScappFeeder._sum_channel``/``_build_channel_arrays`` are the
+    real-time GPU hot path (see module docstring): rewritten to hoist every
+    batch-constant term (``TWO_PI*f_start``, the scurve constants,
+    ``max_value``, ``phase_offset+static_phase``) out of the per-iteration
+    computation instead of recomputing it on every fill-loop call, and to
+    skip the scurve terms/``cp.where`` select entirely when no active tone
+    needs them. There's no GPU in CI, so ``cp`` is monkeypatched to plain
+    numpy (the array API scapp.py uses is numpy-compatible) and the fast
+    path's output is checked against ``segment_total_phase`` — the
+    unmodified, already-tested pure-math reference — evaluated per-tone in
+    a plain Python loop.
+    """
+
+    @staticmethod
+    def _reference_channel_sum(
+        segments, channel, sample_rate_hz, abs_sample, max_value
+    ):
+        total = np.zeros(abs_sample.shape, dtype=np.float64)
+        for (ch, _tone_idx), seg in segments.items():
+            if ch != channel:
+                continue
+            t = (abs_sample - seg.start_sample).astype(np.float64) / sample_rate_hz
+            phase = segment_total_phase(seg, t, xp=np)
+            total = total + np.sin(phase) * (seg.amplitude_pct / 100.0) * max_value
+        return total
+
+    @staticmethod
+    def _fast_channel_sum(
+        monkeypatch, segments, channel, sample_rate_hz, abs_sample, max_value
+    ):
+        import awg_controller.src.scapp as scapp_module
+
+        monkeypatch.setattr(scapp_module, "cp", np)
+        arrays = scapp_module._build_channel_arrays(segments, channel, max_value)
+        feeder = ScappFeeder.__new__(ScappFeeder)
+        feeder._sample_rate_hz = sample_rate_hz
+        return feeder._sum_channel(arrays, abs_sample)
+
+    @staticmethod
+    def _segments_for(ramps, shape, start_sample=0):
+        segments = {}
+        for ramp in ramps:
+            segments[(ramp.channel, ramp.tone_index)] = ToneSegment(
+                channel=ramp.channel,
+                tone_index=ramp.tone_index,
+                shape=shape,
+                f_start=ramp.f_start,
+                f_end=ramp.f_end,
+                duration_s=0.0 if shape == "hold" else 1e-6,
+                amplitude_pct=ramp.amplitude_pct,
+                phase_offset_rad=0.1 * (ramp.tone_index + 1),
+                static_phase_rad=math.radians(ramp.phase_deg),
+                start_sample=start_sample,
+            )
+        return segments
+
+    @pytest.mark.parametrize("shape", ["hold", "linear", "scurve"])
+    def test_single_shape_matches_reference(self, monkeypatch, shape):
+        sample_rate_hz = 1.25e9
+        ramps = [
+            RFRamp(
+                channel=0,
+                core=0,
+                f_start=60e6,
+                f_end=60e6 if shape == "hold" else 90e6,
+                amplitude_pct=8.0,
+                tone_index=i,
+            )
+            for i in range(5)
+        ]
+        segments = self._segments_for(ramps, shape)
+        abs_sample = np.arange(1024, dtype=np.int64) + 3_000_000
+
+        expected = self._reference_channel_sum(
+            segments, 0, sample_rate_hz, abs_sample, max_value=32000.0
+        )
+        actual = self._fast_channel_sum(
+            monkeypatch, segments, 0, sample_rate_hz, abs_sample, max_value=32000.0
+        )
+        np.testing.assert_allclose(actual, expected, rtol=1e-9, atol=1e-9)
+
+    def test_mixed_scurve_and_linear_tones_match_reference(self, monkeypatch):
+        """Exercises the ``cp.where`` select path (``has_scurve=True`` with a
+        mix of shapes on the same channel) — not something a real
+        ``submit_batch`` produces (every ``submit_*`` call stamps one shape
+        for every tone, see module docstring), but the math must stay
+        correct if it ever did.
+        """
+        sample_rate_hz = 1.25e9
+        segments = {}
+        for i, shape in enumerate(["linear", "scurve", "linear", "scurve"]):
+            f_start = 65e6 + i * 1e6
+            f_end = 95e6 - i * 1e6
+            segments[(0, i)] = ToneSegment(
+                channel=0,
+                tone_index=i,
+                shape=shape,
+                f_start=f_start,
+                f_end=f_end,
+                duration_s=2e-6,
+                amplitude_pct=6.0,
+                phase_offset_rad=0.05 * i,
+                static_phase_rad=0.0,
+                start_sample=0,
+            )
+        abs_sample = np.arange(1024, dtype=np.int64) + 500_000
+
+        expected = self._reference_channel_sum(
+            segments, 0, sample_rate_hz, abs_sample, max_value=32000.0
+        )
+        actual = self._fast_channel_sum(
+            monkeypatch, segments, 0, sample_rate_hz, abs_sample, max_value=32000.0
+        )
+        np.testing.assert_allclose(actual, expected, rtol=1e-9, atol=1e-9)
+
+    def test_zero_tones_returns_zero(self, monkeypatch):
+        import awg_controller.src.scapp as scapp_module
+
+        monkeypatch.setattr(scapp_module, "cp", np)
+        arrays = scapp_module._build_channel_arrays({}, 0, 32000.0)
+        assert arrays.n_tones == 0
+
+        feeder = ScappFeeder.__new__(ScappFeeder)
+        feeder._sample_rate_hz = 1.25e9
+        abs_sample = np.arange(1024, dtype=np.int64)
+        out = feeder._sum_channel(arrays, abs_sample)
+        np.testing.assert_array_equal(out, np.zeros(1024))
+
+    def test_has_scurve_flag_matches_segment_shapes(self, monkeypatch):
+        """``has_scurve`` is a host-side Python bool (not a GPU array) so
+        :meth:`ScappFeeder._sum_channel` can skip the scurve math/``cp.where``
+        select in Python at zero GPU cost -- must reflect the segments'
+        actual shapes.
+        """
+        import awg_controller.src.scapp as scapp_module
+
+        monkeypatch.setattr(scapp_module, "cp", np)
+        ramp = RFRamp(
+            channel=0, core=0, f_start=60e6, f_end=90e6, amplitude_pct=8.0, tone_index=0
+        )
+        segs_linear = self._segments_for([ramp], "linear")
+        segs_scurve = self._segments_for([ramp], "scurve")
+
+        assert (
+            scapp_module._build_channel_arrays(segs_linear, 0, 1.0).has_scurve is False
+        )
+        assert (
+            scapp_module._build_channel_arrays(segs_scurve, 0, 1.0).has_scurve is True
+        )

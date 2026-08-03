@@ -536,13 +536,31 @@ class _ChannelToneArrays:
     and was the dominant way a live grid (dozens of active tones per round)
     blew that budget and caused a DMA underrun.
 
+    Every field here that only depends on the *segment* (not on the sample
+    index being rendered) is folded into a single constant once per
+    submitted batch, instead of being recomputed from ``f_start``/``slope``/
+    etc. on every fill-loop iteration. ``two_pi_f_start``/``two_pi_f_end``/
+    ``pi_slope`` (linear/hold) and ``pi_delta_f``/``delta_f_safe_dur``/
+    ``pi_over_safe_dur`` (scurve) are the algebraically-expanded phase
+    formulas from :func:`segment_instantaneous_phase` — see
+    :meth:`ScappFeeder._sum_channel` for the expansion. ``amplitude_frac``
+    likewise already has the card's ``max_sample_value`` baked in (see
+    :func:`_build_channel_arrays`), so the fill loop doesn't need a separate
+    whole-buffer multiply per channel per iteration.
+
     ``is_scurve`` distinguishes only "scurve" from "everything else":
     "hold" (``duration=0``) and "linear" tones share one formula, because
     clamping ``t_c = min(t_local, duration)`` makes the linear ramp term
     evaluate to exactly zero when ``duration=0`` regardless of slope,
     collapsing it to the same ``tail`` term the standalone "hold" branch in
     :func:`segment_instantaneous_phase` uses — a closed-form identity, not
-    an approximation (see :func:`_build_channel_arrays`).
+    an approximation (see :func:`_build_channel_arrays`). ``has_scurve`` is a
+    plain Python ``bool`` (not a GPU array), computed once on the host, so
+    :meth:`ScappFeeder._sum_channel` can skip the scurve terms (and the
+    ``cp.where`` select) entirely in Python at zero GPU cost whenever no
+    active tone uses that shape — since every ``submit_batch``/
+    ``submit_holding`` call re-stamps *every* tone with the same shape (see
+    module docstring), this is almost always true.
 
     All arrays are shape ``(n_tones, 1)`` (including ``start_sample``) so
     they broadcast against a ``(1, n_samples)`` sample-index row in
@@ -550,21 +568,22 @@ class _ChannelToneArrays:
     """
 
     start_sample: "cp.ndarray"
-    f_start: "cp.ndarray"
-    f_end: "cp.ndarray"
     duration: "cp.ndarray"
-    safe_duration: "cp.ndarray"
-    slope: "cp.ndarray"
-    delta_f: "cp.ndarray"
+    two_pi_f_start: "cp.ndarray"
+    two_pi_f_end: "cp.ndarray"
+    pi_slope: "cp.ndarray"
+    pi_delta_f: "cp.ndarray"
+    delta_f_safe_dur: "cp.ndarray"
+    pi_over_safe_dur: "cp.ndarray"
     is_scurve: "cp.ndarray"
+    has_scurve: bool
     amplitude_frac: "cp.ndarray"
-    phase_offset: "cp.ndarray"
-    static_phase: "cp.ndarray"
+    offset_plus_static: "cp.ndarray"
     n_tones: int
 
 
 def _build_channel_arrays(
-    segments: Dict[Tuple[int, int], ToneSegment], channel: int
+    segments: Dict[Tuple[int, int], ToneSegment], channel: int, max_value: float = 1.0
 ) -> "_ChannelToneArrays":
     """Pack every :class:`ToneSegment` active on *channel* into the batched,
     GPU-resident form :class:`_ChannelToneArrays` needs.
@@ -572,7 +591,15 @@ def _build_channel_arrays(
     Runs on plain Python/numpy on the way in — segment dicts are small
     (tens to ~hundreds of tones) and this only runs once per submitted
     batch, not once per fill iteration — with a single host->device upload
-    per field.
+    per field. All the algebra that doesn't depend on the sample index
+    (``TWO_PI * f_start``, the slope/scurve constants, ``amplitude_frac *
+    max_value``, ``phase_offset + static_phase``) is done here, once, so
+    :meth:`ScappFeeder._sum_channel` never repeats it on the real-time path
+    (see :class:`_ChannelToneArrays` docstring for the expanded formulas).
+
+    ``max_value`` (the card's ``max_sample_value``) is folded into
+    ``amplitude_frac`` here instead of being applied as a separate
+    whole-buffer multiply in :meth:`ScappFeeder._fill_loop` every iteration.
     """
     rows = [seg for (ch, _tone_idx), seg in segments.items() if ch == channel]
     n = len(rows)
@@ -598,24 +625,34 @@ def _build_channel_arrays(
     # (duration=0); the result is discarded anyway since t_c=min(t_local, 0)
     # zeroes out everything it multiplies (see class docstring).
     safe_duration = np.where(duration > 0, duration, 1.0)
-    slope = (f_end - f_start) / safe_duration
     delta_f = f_end - f_start
+    slope = delta_f / safe_duration
+
+    # Algebraically-expanded phase constants (see _sum_channel for the
+    # derivation) -- computed once per batch instead of once per iteration.
+    two_pi_f_start = TWO_PI * f_start
+    two_pi_f_end = TWO_PI * f_end
+    pi_slope = math.pi * slope
+    pi_delta_f = math.pi * delta_f
+    delta_f_safe_dur = delta_f * safe_duration
+    pi_over_safe_dur = math.pi / safe_duration
 
     def col(a: np.ndarray) -> "cp.ndarray":
         return cp.asarray(a)[:, None]
 
     return _ChannelToneArrays(
         start_sample=col(start_sample),
-        f_start=col(f_start),
-        f_end=col(f_end),
         duration=col(duration),
-        safe_duration=col(safe_duration),
-        slope=col(slope),
-        delta_f=col(delta_f),
+        two_pi_f_start=col(two_pi_f_start),
+        two_pi_f_end=col(two_pi_f_end),
+        pi_slope=col(pi_slope),
+        pi_delta_f=col(pi_delta_f),
+        delta_f_safe_dur=col(delta_f_safe_dur),
+        pi_over_safe_dur=col(pi_over_safe_dur),
         is_scurve=col(is_scurve),
-        amplitude_frac=col(amplitude_frac),
-        phase_offset=col(phase_offset),
-        static_phase=col(static_phase),
+        has_scurve=bool(is_scurve.any()),
+        amplitude_frac=col(amplitude_frac * max_value),
+        offset_plus_static=col(phase_offset + static_phase),
         n_tones=n,
     )
 
@@ -871,8 +908,8 @@ class ScappFeeder:
         with self._state_lock:
             self._active_segments = segments
             self._channel_arrays = {
-                0: _build_channel_arrays(segments, 0),
-                1: _build_channel_arrays(segments, 1),
+                0: _build_channel_arrays(segments, 0, self._max_value),
+                1: _build_channel_arrays(segments, 1, self._max_value),
             }
             self._next_fill_sample = 0
             self._last_transition_sample = None
@@ -910,8 +947,8 @@ class ScappFeeder:
                 self._config.ramp_shape,
             )
             self._channel_arrays = {
-                0: _build_channel_arrays(self._active_segments, 0),
-                1: _build_channel_arrays(self._active_segments, 1),
+                0: _build_channel_arrays(self._active_segments, 0, self._max_value),
+                1: _build_channel_arrays(self._active_segments, 1, self._max_value),
             }
 
     def _maybe_warn_dropped_transition(self, transition_sample: int) -> None:
@@ -956,6 +993,19 @@ class ScappFeeder:
         phase evaluated in one broadcasted expression instead of a per-tone
         Python loop issuing a GPU kernel launch per tone (see
         :class:`_ChannelToneArrays`).
+
+        Every term here depends on ``abs_sample`` (the one thing that
+        actually changes between fill-loop iterations); everything that
+        doesn't was already folded into ``arrays.*`` once per submitted
+        batch by :func:`_build_channel_arrays` — e.g. ``linear_ramp =
+        TWO_PI*(f_start*t_c + 0.5*slope*t_c**2)`` expands to
+        ``two_pi_f_start*t_c + pi_slope*t_c**2`` (``TWO_PI*0.5 == pi``), and
+        the scurve term similarly to ``two_pi_f_start*t_c + pi_delta_f*t_c -
+        delta_f_safe_dur*sin(pi_over_safe_dur*t_c)``. ``has_scurve`` (a host
+        ``bool``, not a device array) lets the scurve terms and the
+        ``cp.where`` select be skipped in Python, at zero GPU cost, whenever
+        every active tone shares the "hold"/"linear" formula (the common
+        case — see :class:`_ChannelToneArrays`).
         """
         if arrays.n_tones == 0:
             return cp.zeros(abs_sample.shape, dtype=cp.float64)
@@ -966,22 +1016,19 @@ class ScappFeeder:
         # (n_tones, n_samples) per-tone-per-sample local time.
         t_local = (abs_sample[None, :] - arrays.start_sample) / self._sample_rate_hz
         t_c = cp.minimum(t_local, arrays.duration)
-        tail = TWO_PI * arrays.f_end * cp.maximum(t_local - arrays.duration, 0.0)
+        tail = arrays.two_pi_f_end * cp.maximum(t_local - arrays.duration, 0.0)
 
-        linear_ramp = TWO_PI * (arrays.f_start * t_c + 0.5 * arrays.slope * t_c * t_c)
-        scurve_ramp = TWO_PI * (
-            arrays.f_start * t_c
-            + 0.5
-            * arrays.delta_f
-            * (
-                t_c
-                - (arrays.safe_duration / math.pi)
-                * cp.sin(math.pi * t_c / arrays.safe_duration)
+        shared = arrays.two_pi_f_start * t_c
+        linear_extra = arrays.pi_slope * (t_c * t_c)
+        if arrays.has_scurve:
+            scurve_extra = arrays.pi_delta_f * t_c - arrays.delta_f_safe_dur * cp.sin(
+                arrays.pi_over_safe_dur * t_c
             )
-        )
-        ramp = cp.where(arrays.is_scurve, scurve_ramp, linear_ramp)
+            ramp = shared + cp.where(arrays.is_scurve, scurve_extra, linear_extra)
+        else:
+            ramp = shared + linear_extra
 
-        phase = arrays.phase_offset + ramp + tail + arrays.static_phase
+        phase = ramp + tail + arrays.offset_plus_static
         return cp.sum(cp.sin(phase) * arrays.amplitude_frac, axis=0)
 
     def _maybe_start_trigger(self) -> None:
@@ -1055,8 +1102,11 @@ class ScappFeeder:
 
                 abs_sample = chunk_start + self._local_sample_idx
 
-                ch0 = self._sum_channel(channel_arrays[0], abs_sample) * self._max_value
-                ch1 = self._sum_channel(channel_arrays[1], abs_sample) * self._max_value
+                # max_value is already baked into arrays.amplitude_frac (see
+                # _build_channel_arrays), so no separate whole-buffer scale
+                # multiply is needed here per channel per iteration.
+                ch0 = self._sum_channel(channel_arrays[0], abs_sample)
+                ch1 = self._sum_channel(channel_arrays[1], abs_sample)
 
                 # Throttled diagnostic read-back (see _maybe_check_clipping);
                 # the clip itself is unconditional so the amplitude-safety
