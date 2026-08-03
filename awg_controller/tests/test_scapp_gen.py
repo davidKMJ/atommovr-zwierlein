@@ -816,6 +816,7 @@ class TestSumChannelMatchesPureMath:
         arrays = scapp_module._build_channel_arrays(segments, channel, max_value)
         feeder = ScappFeeder.__new__(ScappFeeder)
         feeder._sample_rate_hz = sample_rate_hz
+        feeder._zero_chunk = np.zeros(abs_sample.shape, dtype=np.float64)
         return feeder._sum_channel(arrays, abs_sample)
 
     @staticmethod
@@ -905,8 +906,10 @@ class TestSumChannelMatchesPureMath:
         feeder = ScappFeeder.__new__(ScappFeeder)
         feeder._sample_rate_hz = 1.25e9
         abs_sample = np.arange(1024, dtype=np.int64)
+        feeder._zero_chunk = np.zeros(abs_sample.shape, dtype=np.float64)
         out = feeder._sum_channel(arrays, abs_sample)
         np.testing.assert_array_equal(out, np.zeros(1024))
+        assert out is feeder._zero_chunk
 
     def test_has_scurve_flag_matches_segment_shapes(self, monkeypatch):
         """``has_scurve`` is a host-side Python bool (not a GPU array) so

@@ -666,6 +666,85 @@ def _build_channel_arrays(
     )
 
 
+# ---------------------------------------------------------------------------
+# Fusable per-sample phase/weight math for _sum_channel's real-time hot path.
+# ---------------------------------------------------------------------------
+#
+# Every line in these two functions is a plain elementwise expression (no
+# reductions, no Python branching on array contents), which is exactly what
+# ``cp.fuse`` compiles into a *single* GPU kernel instead of one kernel
+# launch per operator -- collapsing this ~9-op chain from ~9 launches to 1
+# (see :meth:`ScappFeeder._sum_channel`, which still does the final
+# ``cp.sum`` reduction separately, since fused reductions are less portable
+# across cupy versions than a plain elementwise fuse). On real hardware,
+# fixed per-launch dispatch overhead dominates at the sample counts used
+# here, so cutting launch count directly cuts wall-clock time -- unlike
+# reducing FLOPs, which barely matters at this scale.
+#
+# Kept as plain module-level functions (not methods) so ``cp.fuse()`` -- a
+# decorator, not something with special support for bound methods -- can
+# wrap them directly. Conditionally wrapped below only when a real cupy is
+# imported: numpy has no ``fuse``, so the unfused fallback runs as-is under
+# the test suite's numpy-simulated ``cp`` (identical math either way --
+# fusion changes execution strategy, not results).
+
+
+def _linear_phase_weight(
+    abs_sample,
+    start_sample,
+    duration,
+    two_pi_f_start,
+    two_pi_f_end,
+    pi_slope,
+    offset_plus_static,
+    amplitude_frac,
+    sample_rate_hz,
+):
+    """Per-tone-per-sample ``sin(phase) * amplitude`` for "hold"/"linear"
+    tones (see :meth:`ScappFeeder._sum_channel` for the formula derivation).
+    """
+    t_local = (abs_sample - start_sample) / sample_rate_hz
+    t_c = cp.minimum(t_local, duration)
+    tail = two_pi_f_end * cp.maximum(t_local - duration, 0.0)
+    ramp = two_pi_f_start * t_c + pi_slope * (t_c * t_c)
+    phase = ramp + tail + offset_plus_static
+    return cp.sin(phase) * amplitude_frac
+
+
+def _full_phase_weight(
+    abs_sample,
+    start_sample,
+    duration,
+    two_pi_f_start,
+    two_pi_f_end,
+    pi_slope,
+    pi_delta_f,
+    delta_f_safe_dur,
+    pi_over_safe_dur,
+    is_scurve,
+    offset_plus_static,
+    amplitude_frac,
+    sample_rate_hz,
+):
+    """Per-tone-per-sample ``sin(phase) * amplitude``, general form
+    covering a mix of "hold"/"linear" and "scurve" tones on one channel.
+    """
+    t_local = (abs_sample - start_sample) / sample_rate_hz
+    t_c = cp.minimum(t_local, duration)
+    tail = two_pi_f_end * cp.maximum(t_local - duration, 0.0)
+    shared = two_pi_f_start * t_c
+    linear_extra = pi_slope * (t_c * t_c)
+    scurve_extra = pi_delta_f * t_c - delta_f_safe_dur * cp.sin(pi_over_safe_dur * t_c)
+    ramp = shared + cp.where(is_scurve, scurve_extra, linear_extra)
+    phase = ramp + tail + offset_plus_static
+    return cp.sin(phase) * amplitude_frac
+
+
+if _GPU_AVAILABLE and hasattr(cp, "fuse"):
+    _linear_phase_weight = cp.fuse()(_linear_phase_weight)
+    _full_phase_weight = cp.fuse()(_full_phase_weight)
+
+
 class ScappFeeder:
     """Owns the continuous SCAPP GPU buffer-fill loop for one card.
 
@@ -797,6 +876,10 @@ class ScappFeeder:
         # precomputed once instead of relaunching cp.arange every fill
         # iteration in the real-time loop.
         self._local_sample_idx = cp.arange(self._config.notify_samples, dtype=cp.int64)
+        # A channel with zero active tones (e.g. an unpopulated axis) always
+        # renders silence -- cache that instead of launching a fresh
+        # cp.zeros every iteration (see _sum_channel).
+        self._zero_chunk = cp.zeros(self._config.notify_samples, dtype=cp.float64)
 
         self._seed_segments(initial_holding)
 
@@ -1001,44 +1084,61 @@ class ScappFeeder:
         """Vectorized total waveform for one channel: every active tone's
         phase evaluated in one broadcasted expression instead of a per-tone
         Python loop issuing a GPU kernel launch per tone (see
-        :class:`_ChannelToneArrays`).
+        :class:`_ChannelToneArrays`), with that whole expression compiled
+        into a single fused GPU kernel by :func:`_linear_phase_weight` /
+        :func:`_full_phase_weight` instead of one launch per operator — see
+        those functions' module-level comment for why fixed per-launch
+        dispatch overhead (not FLOPs) is what dominates wall-clock time
+        here, and why fusing it away matters.
 
-        Every term here depends on ``abs_sample`` (the one thing that
-        actually changes between fill-loop iterations); everything that
-        doesn't was already folded into ``arrays.*`` once per submitted
-        batch by :func:`_build_channel_arrays` — e.g. ``linear_ramp =
+        Every term depends on ``abs_sample`` (the one thing that actually
+        changes between fill-loop iterations); everything that doesn't was
+        already folded into ``arrays.*`` once per submitted batch by
+        :func:`_build_channel_arrays` — e.g. ``linear_ramp =
         TWO_PI*(f_start*t_c + 0.5*slope*t_c**2)`` expands to
         ``two_pi_f_start*t_c + pi_slope*t_c**2`` (``TWO_PI*0.5 == pi``), and
         the scurve term similarly to ``two_pi_f_start*t_c + pi_delta_f*t_c -
         delta_f_safe_dur*sin(pi_over_safe_dur*t_c)``. ``has_scurve`` (a host
-        ``bool``, not a device array) lets the scurve terms and the
-        ``cp.where`` select be skipped in Python, at zero GPU cost, whenever
-        every active tone shares the "hold"/"linear" formula (the common
-        case — see :class:`_ChannelToneArrays`).
+        ``bool``, not a device array) picks the cheaper fused function
+        entirely in Python, at zero GPU cost, whenever every active tone
+        shares the "hold"/"linear" formula (the common case — see
+        :class:`_ChannelToneArrays`).
         """
         if arrays.n_tones == 0:
-            return cp.zeros(abs_sample.shape, dtype=cp.float64)
+            # Cached in start() -- no GPU allocation/kernel launch for a
+            # channel that's always silent.
+            return self._zero_chunk
 
-        # abs_sample is int64; dividing by the float sample rate already
-        # promotes to float64 (numpy/cupy true-division rules). Broadcasts
-        # (n_tones, 1) start_sample against (1, n_samples) abs_sample to a
-        # (n_tones, n_samples) per-tone-per-sample local time.
-        t_local = (abs_sample[None, :] - arrays.start_sample) / self._sample_rate_hz
-        t_c = cp.minimum(t_local, arrays.duration)
-        tail = arrays.two_pi_f_end * cp.maximum(t_local - arrays.duration, 0.0)
-
-        shared = arrays.two_pi_f_start * t_c
-        linear_extra = arrays.pi_slope * (t_c * t_c)
+        abs_sample_row = abs_sample[None, :]
         if arrays.has_scurve:
-            scurve_extra = arrays.pi_delta_f * t_c - arrays.delta_f_safe_dur * cp.sin(
-                arrays.pi_over_safe_dur * t_c
+            weighted = _full_phase_weight(
+                abs_sample_row,
+                arrays.start_sample,
+                arrays.duration,
+                arrays.two_pi_f_start,
+                arrays.two_pi_f_end,
+                arrays.pi_slope,
+                arrays.pi_delta_f,
+                arrays.delta_f_safe_dur,
+                arrays.pi_over_safe_dur,
+                arrays.is_scurve,
+                arrays.offset_plus_static,
+                arrays.amplitude_frac,
+                self._sample_rate_hz,
             )
-            ramp = shared + cp.where(arrays.is_scurve, scurve_extra, linear_extra)
         else:
-            ramp = shared + linear_extra
-
-        phase = ramp + tail + arrays.offset_plus_static
-        return cp.sum(cp.sin(phase) * arrays.amplitude_frac, axis=0)
+            weighted = _linear_phase_weight(
+                abs_sample_row,
+                arrays.start_sample,
+                arrays.duration,
+                arrays.two_pi_f_start,
+                arrays.two_pi_f_end,
+                arrays.pi_slope,
+                arrays.offset_plus_static,
+                arrays.amplitude_frac,
+                self._sample_rate_hz,
+            )
+        return cp.sum(weighted, axis=0)
 
     def _maybe_start_trigger(self) -> None:
         if self._started:
