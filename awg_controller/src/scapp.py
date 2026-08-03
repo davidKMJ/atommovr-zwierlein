@@ -887,6 +887,7 @@ class ScappFeeder:
         self._iters_since_throughput_check = 0
 
         self._seed_segments(initial_holding)
+        self._warmup_kernels()
 
         self._stop_event = threading.Event()
         self._start_event = threading.Event()
@@ -1010,6 +1011,48 @@ class ScappFeeder:
             }
             self._next_fill_sample = 0
             self._last_transition_sample = None
+
+    def _warmup_kernels(self) -> None:
+        """Force every CUDA kernel the fill loop will need -- including the
+        ``cp.fuse``-compiled ones in :func:`_linear_phase_weight` /
+        :func:`_full_phase_weight`, which JIT-compile lazily on first call
+        -- to compile here, synchronously, before :meth:`_fill_loop` ever
+        runs, instead of paying that cost on the loop's first live
+        iteration where it eats straight into the DMA buffer's underrun
+        cushion for no reason.
+
+        Observed on real hardware: a single first-call warning showing
+        ``compute=0.61 ms over 1 iteration(s)`` -- ruling out backlog
+        (see :meth:`_maybe_warn_throughput`) -- immediately followed by a
+        DMA underrun. That one slow iteration landed exactly because it
+        was simultaneously paying for (a) ``cp.fuse``'s first-call JIT
+        compile of a kernel signature never exercised before (a
+        general-purpose warm-up of the *unfused* ``cp.sin``/``cp.minimum``/
+        etc. primitives, run from the caller before ``start()``, does not
+        pre-compile this — ``cp.fuse`` traces and compiles the *decorated
+        function* itself, a distinct kernel) and (b) :meth:`_maybe_check_clipping`
+        and :meth:`_maybe_warn_throughput` both firing on the same
+        iteration, since both throttle states start unset. This runs the
+        exact same call sequence once, using the real just-seeded
+        ``_channel_arrays`` (so the compiled kernel signatures match
+        real playback exactly), then marks both throttles as just-checked
+        so the fill loop's actual first iteration doesn't redundantly
+        re-pay the (now-cheap, but nonzero) sync cost either.
+        """
+        abs_sample = self._local_sample_idx  # chunk_start=0 for this dry run
+        ch0 = self._sum_channel(self._channel_arrays[0], abs_sample)
+        ch1 = self._sum_channel(self._channel_arrays[1], abs_sample)
+        int(cp.count_nonzero(cp.abs(ch0) > self._max_value))
+        int(cp.count_nonzero(cp.abs(ch1) > self._max_value))
+        ch0 = cp.clip(ch0, -self._max_value, self._max_value)
+        ch1 = cp.clip(ch1, -self._max_value, self._max_value)
+        ch0.astype(self._sample_dtype)
+        ch1.astype(self._sample_dtype)
+        cp.cuda.get_current_stream().synchronize()
+
+        now = time.monotonic()
+        self._last_clip_check_s = now
+        self._last_throughput_warn_s = now
 
     def _transition_segments(self, batch: AWGBatch) -> None:
         """Atomically replace every tone's trajectory at the exact start of

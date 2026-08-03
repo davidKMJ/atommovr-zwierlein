@@ -932,3 +932,56 @@ class TestSumChannelMatchesPureMath:
         assert (
             scapp_module._build_channel_arrays(segs_scurve, 0, 1.0).has_scurve is True
         )
+
+    def test_warmup_kernels_runs_full_pipeline_and_resets_throttles(self, monkeypatch):
+        """``ScappFeeder._warmup_kernels`` (called from ``start()``, real
+        hardware only) runs the exact call sequence a real fill-loop
+        iteration uses -- including the clip-check and cp.fuse-compiled
+        phase/weight math -- once during setup, so any lazy kernel
+        compilation happens before the real-time loop starts instead of on
+        its first live iteration (see the method's docstring for the real
+        first-iteration failure this fixes). It must not raise, and must
+        mark both throttles as just-checked so the fill loop's actual first
+        iteration doesn't redundantly re-pay a (now-cheap) sync.
+        """
+        import awg_controller.src.scapp as scapp_module
+
+        class _FakeStream:
+            def synchronize(self):
+                pass
+
+        class _FakeCuda:
+            @staticmethod
+            def get_current_stream():
+                return _FakeStream()
+
+        monkeypatch.setattr(scapp_module, "cp", np)
+        # cp.cuda.get_current_stream().synchronize() is real-cupy-only;
+        # numpy has no .cuda -- stand in a no-op so this test can exercise
+        # _warmup_kernels' real call sequence without a GPU.
+        monkeypatch.setattr(np, "cuda", _FakeCuda(), raising=False)
+        ramp = RFRamp(
+            channel=0,
+            core=0,
+            f_start=60e6,
+            f_end=60e6,
+            amplitude_pct=40.0,
+            tone_index=0,
+        )
+        batch = AWGBatch(ramps=[ramp], total_duration_s=0.0)
+
+        feeder = ScappFeeder.__new__(ScappFeeder)
+        feeder._state_lock = threading.Lock()
+        feeder._sample_rate_hz = 1.25e9
+        feeder._max_value = 32000
+        feeder._sample_dtype = np.int16
+        feeder._local_sample_idx = np.arange(1024, dtype=np.int64)
+        feeder._zero_chunk = np.zeros(1024, dtype=np.float64)
+        feeder._last_clip_check_s = 0.0
+        feeder._last_throughput_warn_s = 0.0
+
+        feeder._seed_segments(batch)
+        feeder._warmup_kernels()
+
+        assert feeder._last_clip_check_s > 0.0
+        assert feeder._last_throughput_warn_s > 0.0
