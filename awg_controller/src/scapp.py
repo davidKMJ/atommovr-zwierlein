@@ -52,7 +52,11 @@ import numpy as np
 if TYPE_CHECKING:
     from awg_controller.scripts.atommover_controller import HardwareConfig
 
-from awg_controller.src.awg_control import AODSettings, AWGBatch
+from awg_controller.src.awg_control import (
+    ASSUMED_MIN_REAL_MOVE_DURATION_S,
+    AODSettings,
+    AWGBatch,
+)
 
 # Optional hardware driver (same broadened guard as dds_strategies.py: an
 # installed-but-driverless `spcm` package raises a bare Exception from
@@ -86,7 +90,7 @@ MAX_SAFE_OUTPUT_V: float = 2.0
 #: when the GPU genuinely can't keep up with real time. Also gates the GPU
 #: stream sync needed to measure elapsed fill-loop time accurately (see
 #: ScappFeeder._maybe_warn_throughput) -- syncing every iteration would
-#: itself cost more than the entire real-time budget at notify_samples=1024.
+#: itself cost more than the entire real-time budget at notify_samples=16384.
 _THROUGHPUT_WARN_INTERVAL_S: float = 5.0
 
 #: Minimum interval between amplitude-clipping integrity checks (see
@@ -432,50 +436,58 @@ class ScappFeederConfig:
     renders them — the earlier move's chirp never reaches the DAC.
 
     Move-batch durations here are set by ``atommovr.utils.timing`` (Chebyshev
-    distance × ``PhysicalParams.spacing`` / ``AOD_speed``, floored at
-    ``MIN_MOVE_DURATION_S`` = 1 µs) — for the tutorial's lattice
-    (``spacing=18.07 µm``, ``AOD_speed=6``) that's ~3 µs for a 1-site move,
-    ~15 µs for a 5-site move, ~39 µs for a full 13-site sweep. The reference
-    SCAPP example (``spcm-examples/10_cuda_scapp/5_scapp_gen_fifo_sine.py``)
-    used ``notify_samples = 512 * 1024`` for an always-on 2-tone demo with no
+    distance × ``PhysicalParams.spacing`` / ``AOD_speed``, floored at the
+    simulation-wide ``MIN_MOVE_DURATION_S`` = 1 µs). That floor is a
+    theoretical lower bound, not what this hardware/lattice actually
+    produces: ``awg_controller.src.awg_control.ASSUMED_MIN_REAL_MOVE_DURATION_S``
+    (50 µs) is this experiment's own measured fastest-move assumption, and is
+    what the default below is sized against. The reference SCAPP example
+    (``spcm-examples/10_cuda_scapp/5_scapp_gen_fifo_sine.py``) used
+    ``notify_samples = 512 * 1024`` for an always-on 2-tone demo with no
     latency requirement — at the M4i.6631-x8's 1.25 GS/s max rate
     (``awg_controller.src.awg_control.M4I_6631_X8_MAX_SAMPLE_RATE_HZ``) that's
-    a ~419 µs chunk period, over 100x longer than a typical move batch here.
+    a ~419 µs chunk period, ~8x longer than the 50 µs assumed move floor.
 
     Empirically (see ``dropped_transition_count`` /
     ``ScappFeeder._maybe_warn_dropped_transition``, and the offline
-    replay-simulation this default was tuned against), an intermediate
-    64 KiS default (~52 µs, matching Spectrum's own largest real-time
-    acquisition+FFT example) still dropped every submission but one in a
-    72-move Hungarian-algorithm round on this tutorial's lattice, once the
-    control loop's `time.sleep()` pacing was made precise enough to
-    approach the moves' nominal ~3 µs cadence (on a real OS the *actual*
+    replay-simulation this default was tuned against), a notify_samples value
+    picked with too little margin below the real move cadence starts
+    dropping submissions once the control loop's ``time.sleep()`` pacing is
+    precise enough to approach that cadence (on a real OS the *actual*
     scheduling granularity of that sleep — not the nominal move duration —
     is what determines whether this bites; it's easy for that to be
     optimistic on a well-tuned/real-time system).
 
-    The default below (``1024``, i.e. 1 KiS) drives the notify period down
-    to **~0.82 µs at the M4i.6631-x8's 1.25 GS/s max rate** — under even
-    ``MIN_MOVE_DURATION_S`` (1 µs), and it exactly matches the vendored
-    ``spcm`` package's 4096-byte buffer-alignment quantum (1024 samples ×
-    4 bytes/sample-pair = 4096 B), so it doesn't fight that alignment.
+    The default below (``16384``, i.e. 16 KiS) drives the notify period to
+    **~13.1 µs at the M4i.6631-x8's 1.25 GS/s max rate** — about 3.8x margin
+    under the 50 µs ``ASSUMED_MIN_REAL_MOVE_DURATION_S`` floor, and ~16x more
+    real-time budget per fill-loop iteration than the previous 1024-sample
+    (~0.82 µs) default, which left far less headroom than the fixed
+    Python/CuPy dispatch overhead of even one fill iteration needs (see
+    :class:`_ChannelToneArrays`/:meth:`ScappFeeder._sum_channel` for the
+    per-iteration cost this budget has to cover). It stays a multiple of
+    1024 samples, so it doesn't fight the vendored ``spcm`` package's
+    4096-byte buffer-alignment quantum (1024 samples × 4 bytes/sample-pair
+    = 4096 B).
 
-    This is **far below** anything demonstrated in
+    This is still smaller than anything demonstrated in
     ``spcm-examples/10_cuda_scapp`` (that folder's smallest continuous-FIFO
-    example is 64 KiS; ours is 64x smaller) — going this small trades away
-    the throughput headroom those examples were chosen to preserve. Each
-    fill-loop iteration has fixed per-call overhead (Python/CuPy dispatch,
-    lock acquire, iterating every active tone segment) that doesn't shrink
-    with ``notify_samples``, so 64x more iterations per second could plausibly
-    make that fixed overhead dominate the real-time budget and cause actual
-    GPU/DMA underruns — a different, and likely worse, failure mode than the
-    dropped-transition problem this is meant to fix (a real hardware fault,
-    not just a silently-skipped move). **This value is unverified — it must
-    be validated on real hardware**: watch
+    example is 64 KiS; ours is 4x smaller) — going this small trades away
+    some of the throughput headroom those examples were chosen to preserve.
+    Each fill-loop iteration has fixed per-call overhead (Python/CuPy
+    dispatch, lock acquire, iterating every active tone segment) that
+    doesn't shrink with ``notify_samples``, so more iterations per second
+    could still make that fixed overhead dominate the real-time budget and
+    cause actual GPU/DMA underruns — a different, and likely worse, failure
+    mode than the dropped-transition problem this is meant to fix (a real
+    hardware fault, not just a silently-skipped move). **This value is
+    unverified — it must be validated on real hardware**: watch
     :meth:`ScappFeeder._maybe_warn_throughput` for real-time-budget warnings
     and check ``dropped_transition_count`` after a run; raise
-    ``notify_samples`` (in steps, e.g. 2 KiS/4 KiS/8 KiS/64 KiS) if either
-    fires, verifying with an oscilloscope, until both stay clean.
+    ``notify_samples`` (in steps, e.g. 32 KiS/64 KiS) if either fires,
+    verifying with an oscilloscope, until both stay clean — and if the real
+    move cadence ever turns out faster than the 50 µs assumption, lower it
+    again instead.
 
     ``dma_buffer_samples`` must be an **exact multiple** of ``notify_samples``
     (enforced in ``__post_init__``) — the vendored ``spcm`` package's
@@ -485,9 +497,10 @@ class ScappFeederConfig:
     """
 
     #: GPU buffer fill block size (samples). See sizing discussion above —
-    #: this is smaller than any precedented spcm-examples/10_cuda_scapp
-    #: value and needs on-hardware throughput validation.
-    notify_samples: int = 1024
+    #: tuned against ASSUMED_MIN_REAL_MOVE_DURATION_S (50 µs), still smaller
+    #: than any precedented spcm-examples/10_cuda_scapp value, and needs
+    #: on-hardware throughput validation.
+    notify_samples: int = 16384
     #: Total RDMA-pinned DMA buffer size (samples); must be an exact
     #: multiple of ``notify_samples``. ~26.8 ms of underrun cushion at the
     #: M4i.6631-x8's 1.25 GS/s max rate.
@@ -529,10 +542,10 @@ class _ChannelToneArrays:
     This is what lets :meth:`ScappFeeder._sum_channel` evaluate every active
     tone's phase in a handful of vectorized GPU ops regardless of tone
     count, instead of a Python ``for`` loop issuing one GPU kernel launch
-    per tone per iteration. At ``notify_samples=1024`` the real-time budget
-    per fill iteration is under 1 microsecond at the card's max sample rate
-    — far below the fixed dispatch latency of even a single extra kernel
-    launch — so a per-tone loop's overhead scales directly with tone count,
+    per tone per iteration. At ``notify_samples=16384`` the real-time budget
+    per fill iteration is ~13.1 microseconds at the card's max sample rate
+    — still comparable to the fixed dispatch latency of a handful of kernel
+    launches — so a per-tone loop's overhead scales directly with tone count,
     and was the dominant way a live grid (dozens of active tones per round)
     blew that budget and caused a DMA underrun.
 
@@ -1045,7 +1058,7 @@ class ScappFeeder:
         gates more than the log call here: getting an accurate ``elapsed_s``
         requires syncing the GPU stream (all the fill-loop's cupy ops are
         launched async), and a sync every iteration would itself cost more
-        than the entire real-time budget at ``notify_samples=1024``. So
+        than the entire real-time budget at ``notify_samples=16384``. So
         outside the periodic check, this call is a cheap no-op and the loop
         stays fully async.
         """

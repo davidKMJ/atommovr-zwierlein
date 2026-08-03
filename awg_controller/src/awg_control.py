@@ -50,6 +50,20 @@ MAX_AMPLITUDE_PCT_PER_CHANNEL: float = 40.0
 #: observed throughput (`ScappFeeder._maybe_warn_throughput`) on real hardware.
 M4I_6631_X8_MAX_SAMPLE_RATE_HZ: float = 1.25e9
 
+#: Fastest move duration actually expected in practice on the real hardware
+#: this ``ScappFeederConfig``/``HardwareConfig`` notify_samples default is
+#: tuned against — an experiment-specific empirical assumption, **not** the
+#: same thing as ``atommovr.utils.timing.MIN_MOVE_DURATION_S`` (1 µs), which
+#: is a theoretical floor shared across the whole simulation framework and
+#: can be far shorter than any move a given lattice/``AOD_speed`` actually
+#: produces via ``travel_duration_s``. Set here (50 µs) per this
+#: hardware/experiment's own measured move-timescale assumption. If real
+#: moves ever come in faster than this, ``notify_samples`` must be lowered
+#: again to keep resolving them — watch ``dropped_transition_count`` /
+#: ``ScappFeeder._maybe_warn_dropped_transition`` on real hardware to catch
+#: that.
+ASSUMED_MIN_REAL_MOVE_DURATION_S: float = 50e-6
+
 #: Total DDS cores on the Spectrum AWG card (21 cores: indices 0-20).
 TOTAL_DDS_CORES: int = 21
 
