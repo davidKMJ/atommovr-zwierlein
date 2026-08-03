@@ -880,6 +880,11 @@ class ScappFeeder:
         # renders silence -- cache that instead of launching a fresh
         # cp.zeros every iteration (see _sum_channel).
         self._zero_chunk = cp.zeros(self._config.notify_samples, dtype=cp.float64)
+        # Counts iterations since the last _maybe_warn_throughput sync, so
+        # its log line can report an amortized per-iteration compute cost
+        # alongside the raw (possibly backlog-inflated) figure -- see that
+        # method's docstring.
+        self._iters_since_throughput_check = 0
 
         self._seed_segments(initial_holding)
 
@@ -1173,23 +1178,31 @@ class ScappFeeder:
         throttled sync is the *only* place the stream is synced, if the loop
         has been issuing async work faster than the GPU drains it for a
         while, this call also waits out whatever backlog piled up since the
-        last check, not just this iteration's own ops.
+        last check, not just this iteration's own ops. ``self.
+        _iters_since_throughput_check`` (incremented every iteration by
+        :meth:`_fill_loop`, reset here) makes that visible: dividing
+        ``compute_s`` by it gives an amortized per-iteration figure --
+        if that's small while raw ``compute_s`` is large, the raw number
+        is backlog, not a real per-iteration cost.
         """
         now = time.monotonic()
         if now - self._last_throughput_warn_s < _THROUGHPUT_WARN_INTERVAL_S:
             return
         self._last_throughput_warn_s = now
+        n_iters = self._iters_since_throughput_check
+        self._iters_since_throughput_check = 0
         cp.cuda.get_current_stream().synchronize()
         compute_s = time.perf_counter() - t0
         budget_s = self._config.notify_samples / self._sample_rate_hz
         if wait_s + compute_s <= self._config.fill_time_warn_fraction * budget_s:
             return
+        amortized_compute_s = compute_s / max(n_iters, 1)
         log.warning(
             f"SCAPP fill loop running close to real-time budget: "
             f"wait={wait_s * 1e3:.2f} ms, compute={compute_s * 1e3:.2f} ms "
-            f"(compute may include backlog from prior iterations -- see "
-            f"docstring) vs {budget_s * 1e3:.2f} ms budget "
-            f"({n_active_tones} active tones)."
+            f"over {n_iters} iteration(s) since the last check "
+            f"(amortized {amortized_compute_s * 1e3:.4f} ms/iteration) "
+            f"vs {budget_s * 1e3:.2f} ms budget ({n_active_tones} active tones)."
         )
 
     def _maybe_check_clipping(self, ch0_raw, ch1_raw) -> None:
@@ -1230,6 +1243,7 @@ class ScappFeeder:
 
                 t0 = time.perf_counter()
                 wait_s = t0 - t_prev_iter_end
+                self._iters_since_throughput_check += 1
                 with self._state_lock:
                     n_active_tones = len(self._active_segments)
                     channel_arrays = self._channel_arrays
