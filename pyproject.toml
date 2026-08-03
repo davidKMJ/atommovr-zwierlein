@@ -35,6 +35,8 @@ hardware = [
   "pyvisa-py",  # pure-Python VISA backend; skip if using NI-VISA/Keysight IO Libraries
   "zeroconf",
   "pyusb",
+  "pyqtgraph",  # live-plotting widget (e.g. SVA1015X monitor's live trace view)
+  "PyQt5",      # Qt bindings for pyqtgraph windows
   "cuda-python",
   "cupy-cuda12x[ctk]"
 ]
