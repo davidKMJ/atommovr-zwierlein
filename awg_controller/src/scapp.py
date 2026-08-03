@@ -1149,27 +1149,46 @@ class ScappFeeder:
             self._started = True
             self._start_event.set()
 
-    def _maybe_warn_throughput(self, t0: float, n_active_tones: int) -> None:
+    def _maybe_warn_throughput(
+        self, t0: float, wait_s: float, n_active_tones: int
+    ) -> None:
         """Throttled by ``_THROUGHPUT_WARN_INTERVAL_S`` -- and that throttle
-        gates more than the log call here: getting an accurate ``elapsed_s``
+        gates more than the log call here: getting an accurate ``compute_s``
         requires syncing the GPU stream (all the fill-loop's cupy ops are
         launched async), and a sync every iteration would itself cost more
         than the entire real-time budget at ``notify_samples=16384``. So
         outside the periodic check, this call is a cheap no-op and the loop
         stays fully async.
+
+        ``wait_s`` (time blocked in ``for card_buffer in self._scapp_transfer``
+        -- i.e. inside the driver's ``wait_dma()`` -- since the *previous*
+        iteration finished) is passed in already measured and needs no sync:
+        it's a plain wall-clock delta around a blocking call, not GPU work.
+        Reported separately from ``compute_s`` (this iteration's GPU work,
+        synced here) because they have entirely different possible causes --
+        a large ``wait_s`` points at the driver/DMA side (unrelated to
+        anything in this file), while a large ``compute_s`` points at the
+        fill loop's own GPU work. Note ``compute_s`` -- unlike ``wait_s`` --
+        can be inflated by more than just this one iteration: since this
+        throttled sync is the *only* place the stream is synced, if the loop
+        has been issuing async work faster than the GPU drains it for a
+        while, this call also waits out whatever backlog piled up since the
+        last check, not just this iteration's own ops.
         """
         now = time.monotonic()
         if now - self._last_throughput_warn_s < _THROUGHPUT_WARN_INTERVAL_S:
             return
         self._last_throughput_warn_s = now
         cp.cuda.get_current_stream().synchronize()
-        elapsed_s = time.perf_counter() - t0
+        compute_s = time.perf_counter() - t0
         budget_s = self._config.notify_samples / self._sample_rate_hz
-        if elapsed_s <= self._config.fill_time_warn_fraction * budget_s:
+        if wait_s + compute_s <= self._config.fill_time_warn_fraction * budget_s:
             return
         log.warning(
             f"SCAPP fill loop running close to real-time budget: "
-            f"{elapsed_s * 1e3:.2f} ms vs {budget_s * 1e3:.2f} ms budget "
+            f"wait={wait_s * 1e3:.2f} ms, compute={compute_s * 1e3:.2f} ms "
+            f"(compute may include backlog from prior iterations -- see "
+            f"docstring) vs {budget_s * 1e3:.2f} ms budget "
             f"({n_active_tones} active tones)."
         )
 
@@ -1198,11 +1217,19 @@ class ScappFeeder:
 
     def _fill_loop(self) -> None:
         try:
+            # Marks when the previous iteration's body finished, i.e. right
+            # before this thread blocks inside `for card_buffer in
+            # self._scapp_transfer` (the driver's wait_dma()) waiting for
+            # the next chunk. The gap between that and t0 below is real
+            # wall-clock time spent blocked in the driver, not in any of
+            # this file's GPU work -- see _maybe_warn_throughput.
+            t_prev_iter_end = time.perf_counter()
             for card_buffer in self._scapp_transfer:
                 if self._stop_event.is_set():
                     break
 
                 t0 = time.perf_counter()
+                wait_s = t0 - t_prev_iter_end
                 with self._state_lock:
                     n_active_tones = len(self._active_segments)
                     channel_arrays = self._channel_arrays
@@ -1228,7 +1255,8 @@ class ScappFeeder:
                 card_buffer[1, :] = ch1.astype(self._sample_dtype)
 
                 self._maybe_start_trigger()
-                self._maybe_warn_throughput(t0, n_active_tones)
+                self._maybe_warn_throughput(t0, wait_s, n_active_tones)
+                t_prev_iter_end = time.perf_counter()
         except (
             BaseException
         ) as exc:  # noqa: BLE001 - must capture and hand off, not swallow
