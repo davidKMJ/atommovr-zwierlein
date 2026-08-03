@@ -136,10 +136,10 @@ class HardwareConfig:
     #: scapp only: GPU buffer fill block size (samples). See
     #: ``ScappFeederConfig.notify_samples`` for the derivation (~13.1 µs
     #: update granularity at the M4i.6631-x8's 1.25 GS/s max rate — ~3.8x
-    #: margin under ``ASSUMED_MIN_REAL_MOVE_DURATION_S`` (50 µs), but still
-    #: smaller than any precedented ``spcm-examples/10_cuda_scapp`` value;
-    #: unverified on real hardware, watch ``ScappFeeder._maybe_warn_throughput``
-    #: / ``dropped_transition_count`` and raise this if either fires).
+    #: margin under ``MIN_MOVE_DURATION_S`` (50 µs), but still smaller than
+    #: any precedented ``spcm-examples/10_cuda_scapp`` value; unverified on
+    #: real hardware, watch ``ScappFeeder._maybe_warn_throughput`` /
+    #: ``dropped_transition_count`` and raise this if either fires).
     notify_samples: int = 16384
 
     #: scapp only: total RDMA-pinned DMA buffer size (samples). See

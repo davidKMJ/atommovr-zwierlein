@@ -53,9 +53,12 @@ class TestTravelDuration:
         assert dur == pytest.approx(MIN_MOVE_DURATION_S)
 
     def test_aod_speed_inverse(self):
+        # spacing is scaled up (vs. the 5e-6 used elsewhere in this file) so
+        # both raw travel times clear MIN_MOVE_DURATION_S with margin --
+        # otherwise the floor would swamp the 2x relationship being tested.
         moves = [Move(0, 0, 1, 0)]
-        slow = travel_duration_s(moves, 5e-6, 0.1)
-        fast = travel_duration_s(moves, 5e-6, 0.2)
+        slow = travel_duration_s(moves, 1e-3, 0.1)
+        fast = travel_duration_s(moves, 1e-3, 0.2)
         assert slow == pytest.approx(2 * fast)
 
 

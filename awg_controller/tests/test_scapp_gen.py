@@ -702,21 +702,17 @@ class TestScappFeederConfig:
         """notify_samples sets the granularity at which a submitted move can
         actually take effect on the DAC (see ScappFeederConfig docstring).
         The default must be small enough, at the M4i.6631-x8's real 1.25 GS/s
-        max rate, to resolve ASSUMED_MIN_REAL_MOVE_DURATION_S -- this
-        experiment's own assumed fastest move duration (50 µs), not the
-        much smaller simulation-wide MIN_MOVE_DURATION_S floor
-        (atommovr.utils.timing) that no real move on this lattice actually
-        reaches. The original 512 KiS default gave a ~419 µs update period,
-        over 8x longer than that 50 µs assumption.
+        max rate, to resolve even MIN_MOVE_DURATION_S (the shortest a move
+        batch can ever be, atommovr.utils.timing -- 50 µs, raised from an
+        earlier 1 µs). The original 512 KiS default gave a ~419 µs update
+        period, over 8x longer than that.
         """
-        from awg_controller.src.awg_control import (
-            ASSUMED_MIN_REAL_MOVE_DURATION_S,
-            M4I_6631_X8_MAX_SAMPLE_RATE_HZ,
-        )
+        from atommovr.utils.timing import MIN_MOVE_DURATION_S
+        from awg_controller.src.awg_control import M4I_6631_X8_MAX_SAMPLE_RATE_HZ
 
         cfg = ScappFeederConfig()
         notify_period_s = cfg.notify_samples / M4I_6631_X8_MAX_SAMPLE_RATE_HZ
-        assert notify_period_s < ASSUMED_MIN_REAL_MOVE_DURATION_S
+        assert notify_period_s < MIN_MOVE_DURATION_S
 
     def test_dma_buffer_must_be_multiple_of_notify_samples(self):
         """The vendored spcm package's automatic buffer handling only works

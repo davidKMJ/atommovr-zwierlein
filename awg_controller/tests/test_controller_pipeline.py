@@ -1261,13 +1261,16 @@ class TestTransportTiming:
             grid_rows=10,
             grid_cols=10,
         )
-        slow = RFConverter(settings, PhysicalParams(AOD_speed=0.1, spacing=5e-6))
-        fast = RFConverter(settings, PhysicalParams(AOD_speed=0.2, spacing=5e-6))
+        # spacing is scaled up (vs. the 5e-6 used elsewhere in this file) so
+        # both raw travel times clear MIN_MOVE_DURATION_S with margin --
+        # otherwise the floor would swamp the 2x relationship being tested.
+        slow = RFConverter(settings, PhysicalParams(AOD_speed=0.1, spacing=1e-3))
+        fast = RFConverter(settings, PhysicalParams(AOD_speed=0.2, spacing=1e-3))
         move = Move(0, 0, 1, 0)
         d_slow = slow.convert_moves([move]).total_duration_s
         d_fast = fast.convert_moves([move]).total_duration_s
         assert d_slow == pytest.approx(2 * d_fast)
-        assert d_slow == pytest.approx(travel_duration_s([move], 5e-6, 0.1))
+        assert d_slow == pytest.approx(travel_duration_s([move], 1e-3, 0.1))
 
     def test_batch_duration_is_travel_only(self):
         """AWG batch duration equals shared travel_duration_s."""

@@ -52,11 +52,7 @@ import numpy as np
 if TYPE_CHECKING:
     from awg_controller.scripts.atommover_controller import HardwareConfig
 
-from awg_controller.src.awg_control import (
-    ASSUMED_MIN_REAL_MOVE_DURATION_S,
-    AODSettings,
-    AWGBatch,
-)
+from awg_controller.src.awg_control import AODSettings, AWGBatch
 
 # Optional hardware driver (same broadened guard as dds_strategies.py: an
 # installed-but-driverless `spcm` package raises a bare Exception from
@@ -436,17 +432,17 @@ class ScappFeederConfig:
     renders them — the earlier move's chirp never reaches the DAC.
 
     Move-batch durations here are set by ``atommovr.utils.timing`` (Chebyshev
-    distance × ``PhysicalParams.spacing`` / ``AOD_speed``, floored at the
-    simulation-wide ``MIN_MOVE_DURATION_S`` = 1 µs). That floor is a
-    theoretical lower bound, not what this hardware/lattice actually
-    produces: ``awg_controller.src.awg_control.ASSUMED_MIN_REAL_MOVE_DURATION_S``
-    (50 µs) is this experiment's own measured fastest-move assumption, and is
-    what the default below is sized against. The reference SCAPP example
-    (``spcm-examples/10_cuda_scapp/5_scapp_gen_fifo_sine.py``) used
-    ``notify_samples = 512 * 1024`` for an always-on 2-tone demo with no
+    distance × ``PhysicalParams.spacing`` / ``AOD_speed``, floored at
+    ``MIN_MOVE_DURATION_S`` — 50 µs; raised from an earlier 1 µs value, see
+    that constant's docstring). Below ``MIN_MOVE_DURATION_S``, distance/speed
+    differences between moves stop mattering: every move whose raw travel
+    time is smaller floors to exactly 50 µs, so ``notify_samples`` only ever
+    needs to resolve *that* floor, not any faster real move. The reference
+    SCAPP example (``spcm-examples/10_cuda_scapp/5_scapp_gen_fifo_sine.py``)
+    used ``notify_samples = 512 * 1024`` for an always-on 2-tone demo with no
     latency requirement — at the M4i.6631-x8's 1.25 GS/s max rate
     (``awg_controller.src.awg_control.M4I_6631_X8_MAX_SAMPLE_RATE_HZ``) that's
-    a ~419 µs chunk period, ~8x longer than the 50 µs assumed move floor.
+    a ~419 µs chunk period, ~8x longer than the 50 µs move floor.
 
     Empirically (see ``dropped_transition_count`` /
     ``ScappFeeder._maybe_warn_dropped_transition``, and the offline
@@ -460,8 +456,8 @@ class ScappFeederConfig:
 
     The default below (``16384``, i.e. 16 KiS) drives the notify period to
     **~13.1 µs at the M4i.6631-x8's 1.25 GS/s max rate** — about 3.8x margin
-    under the 50 µs ``ASSUMED_MIN_REAL_MOVE_DURATION_S`` floor, and ~16x more
-    real-time budget per fill-loop iteration than the previous 1024-sample
+    under the 50 µs ``MIN_MOVE_DURATION_S`` floor, and ~16x more real-time
+    budget per fill-loop iteration than the previous 1024-sample
     (~0.82 µs) default, which left far less headroom than the fixed
     Python/CuPy dispatch overhead of even one fill iteration needs (see
     :class:`_ChannelToneArrays`/:meth:`ScappFeeder._sum_channel` for the
@@ -485,9 +481,9 @@ class ScappFeederConfig:
     :meth:`ScappFeeder._maybe_warn_throughput` for real-time-budget warnings
     and check ``dropped_transition_count`` after a run; raise
     ``notify_samples`` (in steps, e.g. 32 KiS/64 KiS) if either fires,
-    verifying with an oscilloscope, until both stay clean — and if the real
-    move cadence ever turns out faster than the 50 µs assumption, lower it
-    again instead.
+    verifying with an oscilloscope, until both stay clean — and if
+    ``MIN_MOVE_DURATION_S`` is ever lowered again, ``notify_samples`` must
+    come down with it.
 
     ``dma_buffer_samples`` must be an **exact multiple** of ``notify_samples``
     (enforced in ``__post_init__``) — the vendored ``spcm`` package's
@@ -497,9 +493,9 @@ class ScappFeederConfig:
     """
 
     #: GPU buffer fill block size (samples). See sizing discussion above —
-    #: tuned against ASSUMED_MIN_REAL_MOVE_DURATION_S (50 µs), still smaller
-    #: than any precedented spcm-examples/10_cuda_scapp value, and needs
-    #: on-hardware throughput validation.
+    #: tuned against MIN_MOVE_DURATION_S (50 µs), still smaller than any
+    #: precedented spcm-examples/10_cuda_scapp value, and needs on-hardware
+    #: throughput validation.
     notify_samples: int = 16384
     #: Total RDMA-pinned DMA buffer size (samples); must be an exact
     #: multiple of ``notify_samples``. ~26.8 ms of underrun cushion at the

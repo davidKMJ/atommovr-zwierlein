@@ -17,7 +17,13 @@ from __future__ import annotations
 
 from typing import Any, Sequence
 
-MIN_MOVE_DURATION_S: float = 1e-6
+#: Floor for travel_duration_s -- shortest a move batch can ever be, real
+#: hardware or sim. Any move whose raw Chebyshev-distance travel time
+#: (spacing / AOD_speed) comes out smaller than this gets floored to
+#: exactly this value, so with a large enough floor, distance/speed
+#: differences between moves can stop mattering (every move below it reads
+#: identically) -- see travel_duration_s.
+MIN_MOVE_DURATION_S: float = 50e-6
 
 
 def chebyshev_sites(
